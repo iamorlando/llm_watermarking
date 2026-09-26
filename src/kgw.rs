@@ -1,0 +1,147 @@
+//! Context-dependent soft green-list watermark (Kirchenbauer et al., 2023).
+use std::{collections::HashSet, fmt};
+
+use sha2::Sha256;
+
+use crate::{common, CountDetection, WatermarkError};
+
+pub const HASH_DOMAIN: &[u8] = b"llm-watermarking-kgw-v1\0";
+
+#[derive(Clone)]
+pub struct KgwConfig {
+    pub key: [u8; 32],
+    pub vocab_size: usize,
+    pub context_width: usize,
+    pub green_fraction: f64,
+    /// Additive logit bias, applied equivalently to probability weights.
+    pub delta: f64,
+    /// Detection only: count each (context, token) n-gram once.
+    pub ignore_repeated_ngrams: bool,
+}
+
+impl KgwConfig {
+    pub fn new(key: [u8; 32], vocab_size: usize) -> Self {
+        Self {
+            key,
+            vocab_size,
+            context_width: 1,
+            green_fraction: 0.5,
+            delta: 2.0,
+            ignore_repeated_ngrams: true,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), WatermarkError> {
+        common::validate_vocab(self.vocab_size)?;
+        common::validate_width(self.context_width)?;
+        common::green_count(self.vocab_size, self.green_fraction)?;
+        common::validate_delta(self.delta)
+    }
+}
+
+impl fmt::Debug for KgwConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("KgwConfig")
+            .field("key", &"[redacted]")
+            .field("vocab_size", &self.vocab_size)
+            .field("context_width", &self.context_width)
+            .field("green_fraction", &self.green_fraction)
+            .field("delta", &self.delta)
+            .field("ignore_repeated_ngrams", &self.ignore_repeated_ngrams)
+            .finish()
+    }
+}
+
+#[derive(Clone)]
+pub struct Kgw {
+    prefix: Sha256,
+    vocab_size: usize,
+    context_width: usize,
+    green_count: usize,
+    delta: f64,
+    deduplicate: bool,
+}
+
+impl Kgw {
+    pub fn new(config: &KgwConfig) -> Result<Self, WatermarkError> {
+        config.validate()?;
+        Ok(Self {
+            prefix: common::prefix(
+                HASH_DOMAIN,
+                &config.key,
+                &[config.vocab_size, config.context_width],
+            ),
+            vocab_size: config.vocab_size,
+            context_width: config.context_width,
+            green_count: common::green_count(config.vocab_size, config.green_fraction)?,
+            delta: config.delta,
+            deduplicate: config.ignore_repeated_ngrams,
+        })
+    }
+
+    fn mask(&self, context: &[u32]) -> Vec<bool> {
+        common::green_mask(
+            &common::context_hash(&self.prefix, &context[context.len() - self.context_width..]),
+            self.vocab_size,
+            self.green_count,
+        )
+    }
+
+    /// Return the exact floor(green_fraction * vocab_size) favored token IDs.
+    pub fn green_list(&self, context: &[u32]) -> Result<Vec<u32>, WatermarkError> {
+        common::context(context, 0, self.vocab_size)?;
+        if context.len() < self.context_width {
+            return Err(WatermarkError::InsufficientContext);
+        }
+        Ok(self
+            .mask(context)
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &green)| green.then_some(i as u32))
+            .collect())
+    }
+
+    /// Normalize and boost favored tokens. Short contexts leave weights unchanged.
+    /// Validation errors never modify the input slice.
+    pub fn apply(
+        &self,
+        probs: &mut [f32],
+        context: &[u32],
+        prompt_len: usize,
+    ) -> Result<(), WatermarkError> {
+        common::context(context, prompt_len, self.vocab_size)?;
+        common::weights(probs, self.vocab_size)?;
+        if context.len() < self.context_width {
+            return Ok(());
+        }
+        let mask = self.mask(context);
+        common::boost(probs, |i| mask[i], self.delta);
+        Ok(())
+    }
+
+    /// Exclude prompt, warmup, generated EOS and its suffix, and (by default)
+    /// duplicate n-grams. The null rate uses the actual rounded partition size.
+    pub fn detect(
+        &self,
+        tokens: &[u32],
+        prompt_len: usize,
+        eos_token_ids: &[u32],
+    ) -> Result<CountDetection, WatermarkError> {
+        let end = common::completion_end(tokens, prompt_len, eos_token_ids, self.vocab_size)?;
+        let mut seen = HashSet::new();
+        let (mut trials, mut successes) = (0, 0);
+        for i in prompt_len.max(self.context_width)..end {
+            if self.deduplicate && !seen.insert(&tokens[i - self.context_width..=i]) {
+                continue;
+            }
+            trials += 1;
+            successes +=
+                usize::from(self.mask(&tokens[i - self.context_width..i])[tokens[i] as usize]);
+        }
+        Ok(common::count_detection(
+            trials,
+            successes,
+            self.green_count as f64 / self.vocab_size as f64,
+        ))
+    }
+}

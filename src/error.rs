@@ -10,6 +10,26 @@ pub enum WatermarkError {
     EmptyDistribution,
     InvalidProbability { index: usize },
     ZeroProbabilityMass,
+    InvalidVocabSize,
+    VocabularySizeMismatch { expected: usize, actual: usize },
+    TokenOutOfRange { token: u32, vocab_size: usize },
+    InvalidContextWidth,
+    InsufficientContext,
+    InvalidGreenFraction,
+    InvalidDelta,
+    InvalidSequenceLength,
+    InvalidAlignment,
+    AlignmentTooLarge,
+    InvalidRadix,
+    InvalidPayloadLength,
+    InvalidPayloadSymbol { index: usize },
+    InvalidEmbeddingDimension,
+    InvalidHyperplaneCount,
+    InvalidMargin,
+    InvalidMaxAttempts,
+    EmbeddingDimensionMismatch { expected: usize, actual: usize },
+    InvalidEmbedding { index: usize },
+    ZeroEmbedding,
 }
 
 impl fmt::Display for WatermarkError {
@@ -29,6 +49,49 @@ impl fmt::Display for WatermarkError {
             Self::ZeroProbabilityMass => {
                 f.write_str("probability distribution must have positive mass")
             }
+            Self::InvalidVocabSize => f.write_str("vocab_size must be between 2 and u32::MAX"),
+            Self::VocabularySizeMismatch { expected, actual } => {
+                write!(f, "expected {expected} vocabulary weights, got {actual}")
+            }
+            Self::TokenOutOfRange { token, vocab_size } => write!(
+                f,
+                "token {token} is outside vocabulary of size {vocab_size}"
+            ),
+            Self::InvalidContextWidth => f.write_str("context_width must be between 1 and 32"),
+            Self::InsufficientContext => f.write_str("not enough tokens to seed the watermark"),
+            Self::InvalidGreenFraction => f.write_str(
+                "green_fraction must be finite and select at least one but not all items",
+            ),
+            Self::InvalidDelta => f.write_str("delta must be finite and nonnegative"),
+            Self::InvalidSequenceLength => f.write_str("sequence_len must be between 1 and 65536"),
+            Self::InvalidAlignment => f.write_str(
+                "block_size must be positive and edit_penalty, if supplied, finite and nonnegative",
+            ),
+            Self::AlignmentTooLarge => f.write_str(
+                "alignment cost matrix exceeds max_cells; shorten the input or increase max_cells",
+            ),
+            Self::InvalidRadix => {
+                f.write_str("radix must be between 2 and 256 and no greater than vocab_size")
+            }
+            Self::InvalidPayloadLength => f.write_str(
+                "payload_len must be between 1 and 65536 and match the supplied payload",
+            ),
+            Self::InvalidPayloadSymbol { index } => {
+                write!(f, "payload symbol at index {index} is outside the radix")
+            }
+            Self::InvalidEmbeddingDimension => {
+                f.write_str("embedding_dim must be between 1 and 65536")
+            }
+            Self::InvalidHyperplaneCount => f.write_str("num_hyperplanes must be between 1 and 16"),
+            Self::InvalidMargin => f.write_str("margin must be finite and in [0, 1)"),
+            Self::InvalidMaxAttempts => f.write_str("max_attempts must be positive"),
+            Self::EmbeddingDimensionMismatch { expected, actual } => {
+                write!(f, "expected embedding dimension {expected}, got {actual}")
+            }
+            Self::InvalidEmbedding { index } => {
+                write!(f, "embedding component at index {index} must be finite")
+            }
+            Self::ZeroEmbedding => f.write_str("embedding must have nonzero norm"),
         }
     }
 }
