@@ -1,0 +1,17 @@
+[package]
+name = "llm-watermarking"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Model-independent text watermarking algorithms in Rust"
+license = "MIT"
+readme = "README.md"
+keywords = ["llm", "watermarking", "synthid", "text"]
+categories = ["algorithms", "text-processing"]
+
+[dependencies]
+sha2 = "0.10.9"
+
+[dev-dependencies]
+rand = "0.9.3"
+rand_isaac = "0.4.0"
