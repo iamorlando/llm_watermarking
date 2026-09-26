@@ -23,3 +23,7 @@ extern "C" __global__ void watermark_resolve(const uchar* seed, uchar* output, u
   uint tid=blockIdx.x*blockDim.x+threadIdx.x;
   wm_resolve(output,random,size,tid);
 }
+extern "C" __global__ void watermark_input(const uchar* seed, const uint* input, uchar* output,
+                                           uint len, uint input_len, uint size, uint mode, uint param, uint repeat) {
+  wm_input(seed,input,output,len,input_len,size,mode,param,repeat,blockIdx.x*blockDim.x+threadIdx.x);
+}

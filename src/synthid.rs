@@ -247,6 +247,58 @@ impl SynthIdText {
     }
 }
 
+#[cfg(feature = "candle")]
+impl SynthIdText {
+    /// Hash only the K actual candidate IDs; the result retains candidate order.
+    pub fn prepare_indexed(
+        &self,
+        candidates: &crate::tensor::IndexedCandidates,
+        context: &[u32],
+        prompt_len: usize,
+    ) -> candle_core::Result<crate::tensor::PreparedIndexedWatermark> {
+        use crate::tensor::{PreparedIndexedWatermark, PreparedWatermark};
+        if prompt_len > context.len() {
+            return Err(candle_core::Error::wrap(
+                WatermarkError::PromptLengthExceedsContext,
+            ));
+        }
+        if context.len() < self.context_len || self.repeated_context(context, prompt_len) {
+            return Ok(PreparedIndexedWatermark::new(
+                candidates,
+                PreparedWatermark::identity(candidates.len(), candidates.device()),
+            ));
+        }
+        let seed = self.tensor_seed.context(
+            &context[context.len() - self.context_len..],
+            candidates.device(),
+        )?;
+        let bits =
+            crate::device_metadata::synthid_indexed(&seed, candidates.token_ids(), self.depth)?;
+        Ok(PreparedIndexedWatermark::new(
+            candidates,
+            PreparedWatermark::tournament(bits, candidates.len(), self.depth)?,
+        ))
+    }
+
+    /// Preparation from device history, including the exact 1,024-position
+    /// generation repeat window. No token history or status is read back.
+    pub fn prepare_indexed_device(
+        &self,
+        candidates: &crate::tensor::IndexedCandidates,
+        history: &crate::tensor::DeviceHistory,
+    ) -> candle_core::Result<crate::tensor::PreparedIndexedWatermark> {
+        use crate::tensor::{PreparedIndexedWatermark, PreparedWatermark};
+        let (seed, active) = history.seed(&self.tensor_seed, candidates, self.context_len, true)?;
+        let bits =
+            crate::device_metadata::synthid_indexed(&seed, candidates.token_ids(), self.depth)?;
+        Ok(PreparedIndexedWatermark::new(
+            candidates,
+            PreparedWatermark::tournament(bits, candidates.len(), self.depth)?,
+        )
+        .with_active(active))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

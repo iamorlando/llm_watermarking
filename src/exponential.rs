@@ -108,3 +108,47 @@ impl ExponentialRace {
             .apply(probabilities)
     }
 }
+
+#[cfg(feature = "candle")]
+impl ExponentialRace {
+    /// K-only hashing using actual vocabulary IDs and the full vocabulary seed.
+    pub fn prepare_indexed(
+        &self,
+        candidates: &crate::tensor::IndexedCandidates,
+        position: usize,
+    ) -> candle_core::Result<crate::tensor::PreparedIndexedSampler> {
+        candidates.check_vocab(self.core.vocab_size)?;
+        let position = ((position % self.core.sequence_len) as u64).to_le_bytes();
+        let seed = self
+            .core
+            .tensor_seed
+            .tensor(&position, candidates.device())?;
+        self.indexed_seed(candidates, &seed)
+    }
+
+    /// `position` is a U32 tensor of shape [1], independent of prompt length.
+    /// Wrapping to the configured key-stream period executes on the device.
+    pub fn prepare_indexed_device(
+        &self,
+        candidates: &crate::tensor::IndexedCandidates,
+        position: &candle_core::Tensor,
+    ) -> candle_core::Result<crate::tensor::PreparedIndexedSampler> {
+        candidates.check_vocab(self.core.vocab_size)?;
+        let prefix = self.core.tensor_seed.tensor(&[], candidates.device())?;
+        let seed =
+            crate::device_metadata::position_seed(&prefix, position, self.core.sequence_len)?;
+        self.indexed_seed(candidates, &seed)
+    }
+
+    fn indexed_seed(
+        &self,
+        candidates: &crate::tensor::IndexedCandidates,
+        seed: &candle_core::Tensor,
+    ) -> candle_core::Result<crate::tensor::PreparedIndexedSampler> {
+        let gumbels = crate::device_metadata::exponential_indexed(seed, candidates.token_ids())?;
+        Ok(crate::tensor::PreparedIndexedSampler::new(
+            candidates,
+            crate::tensor::PreparedSampler::exponential(gumbels)?,
+        ))
+    }
+}

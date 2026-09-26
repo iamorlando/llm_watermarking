@@ -5,6 +5,12 @@ use std::sync::{Arc, Mutex};
 use candle_core::{CpuStorage, CustomOp1, Device, Layout, Result, Shape, Tensor};
 use sha2::{Digest, Sha256};
 
+mod input;
+pub(crate) use input::{
+    context_seed, exponential_indexed, payload_slot, position_seed, sort_u32, synthid_indexed,
+    uniform,
+};
+
 #[cfg(feature = "cuda")]
 #[allow(unsafe_code)] // Audited Candle/cudarc allocation and kernel launches only.
 #[path = "device_metadata/cuda.rs"]

@@ -18,3 +18,7 @@ kernel void watermark_resolve(device const uchar* seed [[buffer(0)]], device uch
                             device uint* random [[buffer(2)]], constant uint* p [[buffer(3)]], uint tid [[thread_position_in_grid]]) {
   wm_resolve(output,random,p[1],tid);
 }
+kernel void watermark_input(device const uchar* seed [[buffer(0)]], device const uint* input [[buffer(1)]],
+                            device uchar* output [[buffer(2)]], constant uint* p [[buffer(3)]], uint tid [[thread_position_in_grid]]) {
+  wm_input(seed,input,output,p[0],p[1],p[2],p[3],p[4],p[5],tid);
+}

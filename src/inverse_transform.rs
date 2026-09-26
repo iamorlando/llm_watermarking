@@ -129,3 +129,41 @@ impl InverseTransform {
             .apply(probabilities)
     }
 }
+
+#[cfg(feature = "candle")]
+impl InverseTransform {
+    /// Reuse the full-vocabulary permutation, sort only candidate ranks and scan
+    /// only K weights. Output scores are in the caller's original candidate order.
+    pub fn prepare_indexed(
+        &self,
+        candidates: &crate::tensor::IndexedCandidates,
+        position: usize,
+    ) -> candle_core::Result<crate::tensor::PreparedIndexedSampler> {
+        candidates.check_vocab(self.core.vocab_size)?;
+        self.prepare_tensor(position, candidates.device())?
+            .indexed(candidates)
+    }
+
+    /// Position [1] U32 and the resulting keyed uniform stay on the device.
+    pub fn prepare_indexed_device(
+        &self,
+        candidates: &crate::tensor::IndexedCandidates,
+        position: &candle_core::Tensor,
+    ) -> candle_core::Result<crate::tensor::PreparedIndexedSampler> {
+        candidates.check_vocab(self.core.vocab_size)?;
+        if self.core.vocab_size > crate::tensor::MAX_INVERSE_TENSOR_VOCAB {
+            candle_core::bail!("inverse-transform tensor vocabulary exceeds the F32 rank limit");
+        }
+        let prefix = self.core.tensor_seed.tensor(&[], candidates.device())?;
+        let (_, ranks) = self.tensor_permutation.get(candidates.device(), || {
+            crate::device_metadata::permutation(&prefix, self.core.vocab_size)
+        })?;
+        let seed =
+            crate::device_metadata::position_seed(&prefix, position, self.core.sequence_len)?;
+        crate::tensor::PreparedIndexedSampler::inverse(
+            candidates,
+            &ranks,
+            crate::device_metadata::uniform(&seed)?,
+        )
+    }
+}

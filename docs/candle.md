@@ -49,7 +49,8 @@ assert!(marked.device().same_device(probabilities.device()));
 
 These operations accept a dense one-dimensional `[vocab_size]` tensor. Index `i`
 must be token ID `i`; filtering masks tokens with zero weight. Compact top-k
-vectors need the host to restore vocabulary indexing before calling this API.
+vectors use the [indexed candidate APIs](mistral-integration.md), which retain
+actual vocabulary IDs without expanding the probability row.
 Weights may be unnormalized but must be finite, nonnegative, and have positive
 mass. F16, BF16, and F32 are supported; computation uses F32, and probability
 transforms return the input dtype and shape. F64 and integer probabilities are
@@ -95,8 +96,9 @@ rejects an input on another device; it never silently migrates it. Warmup and
 repeated SynthID contexts return the original tensor unchanged after validation.
 Input storage is never mutated, including on errors or speculative retries.
 
-The host owns batching. It can take device-resident rows from a batch, apply the
-corresponding per-sequence operation, and stack the results with Candle. Supplying
+For dense APIs the host can take device-resident rows from a batch, apply the
+corresponding per-sequence operation, and stack the results with Candle. Indexed
+APIs also provide `PreparedIndexedBatch` for independent row preparations. Supplying
 a whole matrix to a token transformation is an error rather than implicitly
 applying one sequence's context to the entire batch.
 
@@ -165,8 +167,8 @@ tensor or model inference. No watermark detector downloads full model weights.
 
 ## Device metadata generation
 
-The tensor preparation paths use Candle `CustomOp1` backend hooks for the missing
-keyed primitives. CPU uses the existing Rust SHA-256 and Fisher–Yates implementation;
+The tensor preparation paths use Candle `CustomOp1`/`CustomOp2` backend hooks
+for the missing keyed primitives. CPU uses the existing Rust SHA-256 and Fisher–Yates implementation;
 CUDA and Metal use a shared watermark-specific SHA-256 kernel and exact shuffle.
 Candle owns the allocations, CUDA stream, Metal encoders and resource dependencies.
 No GPU probability or embedding vector is read back for metadata preparation.
@@ -204,9 +206,13 @@ the PTX, and loads it into the existing Candle CUDA device. CUDA therefore requi
 NVRTC at runtime in addition to Candle's build dependencies. Warm preparation
 before latency-sensitive generation to exclude first-use compilation costs.
 
-Host token-history validation, SynthID repeat checks, the single MPAC payload-slot
-choice and inverse-transform uniform remain CPU bookkeeping. SemStamp's reusable
-hyperplanes are generated once on CPU and uploaded during preparation. Scalar
+In the host-metadata APIs, token-history validation, SynthID repeat checks, the
+single MPAC payload-slot choice and inverse-transform uniform remain CPU
+bookkeeping. `prepare_indexed_device` moves this changing metadata to the GPU;
+`DeviceHistory` supplies resident prefixes, lengths and prompt lengths. See the
+[indexed integration contract](mistral-integration.md) for trusted validation
+preconditions, per-row positions, retry semantics, and the remaining O(V)
+partition work. SemStamp's reusable hyperplanes are generated once on CPU and uploaded during preparation. Scalar
 Unigram/inverse constructors also retain CPU partitions for their scalar APIs and
 detectors. None of these require per-step vocabulary-sized CPU uploads. Strict
 value validation still reads one status scalar; trusted applications avoid it.
@@ -231,9 +237,11 @@ model logits -> penalties/processors -> temperature/softmax -> probability filte
 ```
 
 For exponential-race or inverse-transform, replace the final transformation and
-selection with `selection_scores_tensor -> host argmax`. For fused samplers that
-combine filtering and drawing, split at this boundary or provide an equivalent
-host-owned path when a watermark is enabled. Preserve per-sequence context,
+selection with `selection_scores_tensor -> host argmax`. Fused samplers that
+combine filtering, drawing or speculative acceptance must remain excluded until
+the host exposes this boundary and uses consistent watermarked distributions.
+The indexed/device APIs alone do not make removing those exclusions correct.
+Preserve per-sequence context,
 prompt lengths, original vocabulary indexing, reporting probabilities, and any
 host policy for greedy decoding. Ordinary and speculative generation must use
 consistent watermarked distributions and sequence positions. This crate does

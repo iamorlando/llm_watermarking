@@ -16,7 +16,7 @@ WM_FN uint wm_swap(uint x) {
   return (x >> 24) | ((x >> 8) & 0xff00) | ((x << 8) & 0xff0000) | (x << 24);
 }
 
-// kind: 0 = SynthID token, 1 = EXP token/tag/counter, 2 = permutation tag/counter.
+// kind: 0 = SynthID token, 1 = EXP token/tag/counter, 2 = tag 0, 3 = tag 1.
 WM_FN void wm_digest(WM_DEVICE const uchar* seed, uint seed_len, uint kind,
                      wm_u64 index, WM_PRIVATE uint* h) {
   h[0]=0x6a09e667; h[1]=0xbb67ae85; h[2]=0x3c6ef372; h[3]=0xa54ff53a;
@@ -37,6 +37,7 @@ WM_FN void wm_digest(WM_DEVICE const uchar* seed, uint seed_len, uint kind,
             if (s<4) b=(uint)((index >> (8*s)) & 255);
             else if (s==4) b=2; // EXP tag, followed by counter zero.
           } else if (s>0) b=(uint)((index >> (8*(s-1))) & 255);
+          else if (kind==3) b=1;
         } else if (p==len) b=128;
         else if (p>=padded-8) b=(uint)(((len*8) >> (8*(padded-1-p))) & 255);
         word=(word<<8)|b;

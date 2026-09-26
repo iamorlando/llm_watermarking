@@ -15,12 +15,14 @@ const SOURCE: &str = concat!(
     "\n",
     include_str!("kernels/metadata.h"),
     "\n",
+    include_str!("kernels/input.h"),
+    "\n",
     include_str!("kernels/entry.metal")
 );
-type Pipelines = Vec<(DeviceId, [ComputePipeline; 5])>;
+type Pipelines = Vec<(DeviceId, [ComputePipeline; 6])>;
 static PIPELINES: OnceLock<Mutex<Pipelines>> = OnceLock::new();
 
-fn pipelines(device: &MetalDevice) -> Result<[ComputePipeline; 5]> {
+fn pipelines(device: &MetalDevice) -> Result<[ComputePipeline; 6]> {
     let mut cache = PIPELINES
         .get_or_init(|| Mutex::new(Vec::new()))
         .lock()
@@ -49,6 +51,7 @@ fn pipelines(device: &MetalDevice) -> Result<[ComputePipeline; 5]> {
         make("watermark_links")?,
         make("watermark_parents")?,
         make("watermark_resolve")?,
+        make("watermark_input")?,
     ];
     cache.push((device.id(), pipelines.clone()));
     Ok(pipelines)
@@ -126,6 +129,54 @@ pub(super) fn forward(
     ))
 }
 
+pub(super) fn input_forward(
+    op: &super::input::InputOp,
+    seed: &MetalStorage,
+    seed_layout: &Layout,
+    input: &MetalStorage,
+    input_layout: &Layout,
+) -> Result<(MetalStorage, Shape)> {
+    let (seed_start, _) = super::input::offsets(seed_layout)?;
+    let (input_start, _) = super::input::offsets(input_layout)?;
+    let device = seed.device();
+    let shape = op.shape();
+    let output = device
+        .new_buffer_builder()
+        .with_size_for(shape.elem_count(), op.dtype())
+        .with_label("watermark device inputs")
+        .build()?;
+    let pipeline = &pipelines(device)?[5];
+    let guard = device.command_encoder()?;
+    let encoder: &ComputeCommandEncoder = guard.as_ref();
+    encoder.set_compute_pipeline_state(pipeline);
+    encoder.set_input_buffer(0, Some(seed.buffer()), seed_start);
+    encoder.set_input_buffer(
+        1,
+        Some(input.buffer()),
+        input_start * DType::U32.size_in_bytes(),
+    );
+    encoder.set_output_buffer(2, Some(&output), 0);
+    let parameters = op.parameters();
+    encoder.set_bytes(3, &parameters);
+    let threads = parameters[2] as usize;
+    encoder.dispatch_threads(
+        MTLSize {
+            width: threads,
+            height: 1,
+            depth: 1,
+        },
+        MTLSize {
+            width: threads.min(64),
+            height: 1,
+            depth: 1,
+        },
+    );
+    Ok((
+        MetalStorage::new(output, device.clone(), shape.elem_count(), op.dtype()),
+        shape,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,7 +204,7 @@ mod tests {
             .with_size_for(size * 2, DType::U32)
             .build()?;
         let p = [seed.len() as u32, size as u32, 0, 2];
-        for (pass, pipeline) in pipelines(&device)?.iter().enumerate().skip(1) {
+        for (pass, pipeline) in pipelines(&device)?.iter().enumerate().take(5).skip(1) {
             let guard = device.command_encoder()?;
             let encoder: &ComputeCommandEncoder = guard.as_ref();
             encoder.set_compute_pipeline_state(pipeline);

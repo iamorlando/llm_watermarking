@@ -278,3 +278,51 @@ impl Mpac {
             .apply(probabilities)
     }
 }
+
+#[cfg(feature = "candle")]
+impl Mpac {
+    pub fn prepare_indexed(
+        &self,
+        candidates: &crate::tensor::IndexedCandidates,
+        context: &[u32],
+        prompt_len: usize,
+        payload: &[u8],
+    ) -> candle_core::Result<crate::tensor::PreparedIndexedWatermark> {
+        candidates.check_vocab(self.vocab_size)?;
+        self.prepare_tensor(context, prompt_len, payload, candidates.device())?
+            .indexed(candidates)
+    }
+
+    /// The payload remains caller-owned configuration; context hashing and
+    /// payload-slot selection execute on the device, with no history readback.
+    pub fn prepare_indexed_device(
+        &self,
+        candidates: &crate::tensor::IndexedCandidates,
+        history: &crate::tensor::DeviceHistory,
+        payload: &[u8],
+    ) -> candle_core::Result<crate::tensor::PreparedIndexedWatermark> {
+        use crate::tensor::{PreparedIndexedWatermark, PreparedWatermark};
+        use candle_core::{DType, Tensor};
+        candidates.check_vocab(self.vocab_size)?;
+        self.validate_payload(payload)
+            .map_err(candle_core::Error::wrap)?;
+        let (seed, active) =
+            history.seed(&self.tensor_seed, candidates, self.context_width, false)?;
+        let slot = crate::device_metadata::payload_slot(&seed, self.payload_len)?;
+        let symbol = Tensor::new(payload, candidates.device())?
+            .to_dtype(DType::U32)?
+            .index_select(&slot, 0)?;
+        let group = Tensor::new((self.vocab_size / self.radix) as u32, candidates.device())?;
+        let start = symbol.broadcast_mul(&group)?;
+        let end = start.broadcast_add(&group)?;
+        let (_, ranks) = crate::device_metadata::permutation(&seed, self.vocab_size)?;
+        let ranks = ranks.index_select(&candidates.safe_ids()?, 0)?;
+        let mask = ranks
+            .broadcast_ge(&start)?
+            .mul(&ranks.broadcast_lt(&end)?)?;
+        Ok(
+            PreparedIndexedWatermark::new(candidates, PreparedWatermark::bias(mask, self.delta)?)
+                .with_active(active),
+        )
+    }
+}

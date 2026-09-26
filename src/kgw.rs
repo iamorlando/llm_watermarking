@@ -186,3 +186,38 @@ impl Kgw {
             .apply(probabilities)
     }
 }
+
+#[cfg(feature = "candle")]
+impl Kgw {
+    /// Full-vocabulary partition with probability work restricted to K candidates.
+    pub fn prepare_indexed(
+        &self,
+        candidates: &crate::tensor::IndexedCandidates,
+        context: &[u32],
+        prompt_len: usize,
+    ) -> candle_core::Result<crate::tensor::PreparedIndexedWatermark> {
+        candidates.check_vocab(self.vocab_size)?;
+        self.prepare_tensor(context, prompt_len, candidates.device())?
+            .indexed(candidates)
+    }
+
+    /// Device-resident context preparation. No history readback or host seed construction.
+    pub fn prepare_indexed_device(
+        &self,
+        candidates: &crate::tensor::IndexedCandidates,
+        history: &crate::tensor::DeviceHistory,
+    ) -> candle_core::Result<crate::tensor::PreparedIndexedWatermark> {
+        use crate::tensor::{PreparedIndexedWatermark, PreparedWatermark};
+        candidates.check_vocab(self.vocab_size)?;
+        let (seed, active) =
+            history.seed(&self.tensor_seed, candidates, self.context_width, false)?;
+        let (_, ranks) = crate::device_metadata::permutation(&seed, self.vocab_size)?;
+        let mask = ranks
+            .index_select(&candidates.safe_ids()?, 0)?
+            .lt(self.green_count as u32)?;
+        Ok(
+            PreparedIndexedWatermark::new(candidates, PreparedWatermark::bias(mask, self.delta)?)
+                .with_active(active),
+        )
+    }
+}

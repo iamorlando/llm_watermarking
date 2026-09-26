@@ -1,10 +1,19 @@
-//! Device-preserving Candle operations on one dense vocabulary row at a time.
+//! Device-preserving Candle operations on dense or indexed candidate rows.
 //! Prepared operations cache only keyed metadata, never model probabilities.
 //! `apply` validates values using a scalar device-to-host status read;
 //! `apply_trusted` checks shape/dtype/device but trusts the host's weight values.
 #![doc = include_str!("../docs/candle.md")]
+#![doc = include_str!("../docs/mistral-integration.md")]
 
 use candle_core::{DType, Device, Result, Tensor};
+
+mod indexed;
+mod resident;
+pub use indexed::{
+    IndexedCandidates, PreparedIndexedBatch, PreparedIndexedOperation, PreparedIndexedSampler,
+    PreparedIndexedWatermark,
+};
+pub use resident::DeviceHistory;
 
 /// Largest inverse-transform vocabulary with distinct integer ranks in F32 scores.
 pub const MAX_INVERSE_TENSOR_VOCAB: usize = 1 << 24;
@@ -41,7 +50,8 @@ enum Selection {
     Inverse {
         order: Tensor,
         ranks: Tensor,
-        uniform: f64,
+        uniform: Tensor,
+        score_ranks: Option<Tensor>,
     },
 }
 
@@ -176,6 +186,10 @@ impl PreparedSampler {
         if vocab_size > MAX_INVERSE_TENSOR_VOCAB {
             candle_core::bail!("inverse-transform tensor vocabulary exceeds the F32 rank limit of {MAX_INVERSE_TENSOR_VOCAB}");
         }
+        let uniform = Tensor::new(
+            (uniform as f32).min(f32::from_bits(1.0f32.to_bits() - 1)),
+            order.device(),
+        )?;
         Ok(Self {
             vocab_size,
             device: order.device().clone(),
@@ -183,6 +197,7 @@ impl PreparedSampler {
                 order,
                 ranks,
                 uniform,
+                score_ranks: None,
             },
         })
     }
@@ -204,22 +219,25 @@ impl PreparedSampler {
                 order,
                 ranks,
                 uniform,
+                score_ranks,
             } => {
                 let ordered = normalize(&weights)?.index_select(order, 0)?;
                 let cdf = cumulative_sum(&ordered)?;
                 // Rounding a 52-bit uniform to F32 must not create the endpoint 1.
-                let u = (*uniform as f32).min(f32::from_bits(1.0f32.to_bits() - 1));
                 let target = cdf
                     .narrow(0, self.vocab_size - 1, 1)?
-                    .affine(f64::from(u), 0.0)?;
+                    .broadcast_mul(uniform)?;
                 let eligible = cdf
                     .broadcast_gt(&target)?
                     .to_dtype(DType::F32)?
                     .mul(&ordered.gt(0.0)?.to_dtype(DType::F32)?)?
                     .gt(0.0)?;
-                let negative_rank = Tensor::arange(0u32, self.vocab_size as u32, &self.device)?
-                    .to_dtype(DType::F32)?
-                    .neg()?;
+                let negative_rank = match score_ranks {
+                    Some(ranks) => ranks.clone(),
+                    None => Tensor::arange(0u32, self.vocab_size as u32, &self.device)?,
+                }
+                .to_dtype(DType::F32)?
+                .neg()?;
                 let excluded = Tensor::full(f32::NEG_INFINITY, self.vocab_size, &self.device)?;
                 eligible
                     .where_cond(&negative_rank, &excluded)?

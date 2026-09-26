@@ -146,3 +146,16 @@ impl Unigram {
             .apply(probabilities)
     }
 }
+
+#[cfg(feature = "candle")]
+impl Unigram {
+    /// Reuse the fixed vocabulary partition and gather only the candidate mask.
+    pub fn prepare_indexed(
+        &self,
+        candidates: &crate::tensor::IndexedCandidates,
+    ) -> candle_core::Result<crate::tensor::PreparedIndexedWatermark> {
+        candidates.check_vocab(self.mask.len())?;
+        self.prepare_tensor(candidates.device())?
+            .indexed(candidates)
+    }
+}

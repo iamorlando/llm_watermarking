@@ -28,6 +28,13 @@ probabilities on the input device. Exponential-race and inverse-transform expose
 categorical draw. SemStamp provides tensor embedding projection and acceptance
 masks. Prepared operations cache keyed metadata for reuse on the same device.
 
+Compact top-k integrations use `tensor::IndexedCandidates` and each scheme's
+`prepare_indexed(...).apply_trusted(weights)`, retaining actual vocabulary IDs
+without scattering weights into a dense row. `prepare_indexed_device` consumes
+device history/positions; `PreparedIndexedBatch` applies independent per-row
+preparations. See the [Mistral feedback response and migration guide](docs/mistral-integration.md)
+and [compact integration example](examples/indexed.rs).
+
 The optional `candle-core` dependency pins Git revision
 `66a8cf184a5a519671454066b1b9efd446ec9f5c`, matching the inspected mistral-rs
 workspace's exact package identity. There is no dependency on mistral-rs itself.
@@ -37,12 +44,15 @@ existing pre-filter logits processor is not that insertion point.
 Probability math uses Candle operations. Watermark-specific Candle custom operations
 compute vocabulary-wide SHA-256 values and exact keyed permutations on the input
 device, including CUDA and Metal. Keys and fixed metadata are cached per device;
-changing contexts upload only small seed suffixes. Probability vectors are never
-downloaded for transformation. Strict calls read one validation status scalar;
-prepared `apply_trusted` calls avoid that synchronization when the host guarantees
-valid weights. Small host context/scalar bookkeeping and one-time SemStamp
-hyperplane generation remain on CPU. The GPU reconstructs the exact Fisher–Yates
-permutation in parallel; GPU residency alone is not a blanket speedup claim.
+host-context calls upload only small seed suffixes. Probability vectors are never
+downloaded for transformation. Dense strict calls read one validation status
+scalar; indexed strict calls also validate candidate IDs. Trusted constructors
+and `apply_trusted` avoid validation synchronization when the host guarantees
+the value contracts. Host-metadata APIs retain small CPU bookkeeping; indexed
+device preparation keeps histories, repeat checks, payload-slot choices, and
+positions on device. One-time SemStamp hyperplane generation remains on CPU.
+The GPU reconstructs the exact Fisher–Yates permutation in parallel; GPU
+residency alone is not a blanket speedup claim.
 
 See [the tensor API and mistral-rs integration boundary](docs/candle.md),
 [the runnable example](examples/candle.rs), and [backend parity tests](tests/candle_api.rs).
