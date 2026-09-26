@@ -1,7 +1,9 @@
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 #![doc = include_str!("../README.md")]
 
 mod common;
+#[cfg(feature = "candle")]
+mod device_metadata;
 mod error;
 pub mod exponential;
 pub mod inverse_transform;

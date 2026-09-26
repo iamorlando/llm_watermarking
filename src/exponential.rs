@@ -92,10 +92,10 @@ impl ExponentialRace {
         position: usize,
         device: &candle_core::Device,
     ) -> candle_core::Result<crate::tensor::PreparedSampler> {
-        let gumbels = (0..self.core.vocab_size)
-            .map(|token| (-(-self.uniform(position, token as u32).ln()).ln()) as f32)
-            .collect();
-        crate::tensor::PreparedSampler::exponential(gumbels, device)
+        let position = ((position % self.core.sequence_len) as u64).to_le_bytes();
+        let seed = self.core.tensor_seed.tensor(&position, device)?;
+        let gumbels = crate::device_metadata::exponential(&seed, self.core.vocab_size)?;
+        crate::tensor::PreparedSampler::exponential(gumbels)
     }
 
     /// F32 Gumbel-max scores. The host selects argmax, not a categorical draw.

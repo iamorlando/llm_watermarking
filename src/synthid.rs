@@ -54,6 +54,8 @@ impl fmt::Debug for SynthIdConfig {
 #[derive(Clone)]
 pub struct SynthIdText {
     hash_prefix: Sha256,
+    #[cfg(feature = "candle")]
+    tensor_seed: crate::device_metadata::Seed,
     context_len: usize,
     depth: usize,
 }
@@ -72,6 +74,13 @@ impl SynthIdText {
         hash_prefix.update((config.ngram_len as u32).to_le_bytes());
         Ok(Self {
             hash_prefix,
+            #[cfg(feature = "candle")]
+            tensor_seed: {
+                let mut bytes = domain.to_vec();
+                bytes.extend_from_slice(&config.key);
+                bytes.extend_from_slice(&(config.ngram_len as u32).to_le_bytes());
+                crate::device_metadata::Seed::new(bytes)
+            },
             context_len: config.ngram_len - 1,
             depth: config.depth,
         })
@@ -214,16 +223,11 @@ impl SynthIdText {
         if context.len() < self.context_len || self.repeated_context(context, prompt_len) {
             return Ok(PreparedWatermark::identity(vocab_size, device));
         }
-        let hash = self.context_hash(&context[context.len() - self.context_len..]);
-        let bytes = self.depth.div_ceil(8);
-        let mut packed = vec![0u8; bytes * vocab_size];
-        for token in 0..vocab_size {
-            let values = Self::g_values(&hash, token as u32);
-            for byte in 0..bytes {
-                packed[byte * vocab_size + token] = values[byte];
-            }
-        }
-        PreparedWatermark::tournament(packed, vocab_size, self.depth, device)
+        let seed = self
+            .tensor_seed
+            .context(&context[context.len() - self.context_len..], device)?;
+        let packed = crate::device_metadata::synthid(&seed, vocab_size, self.depth)?;
+        PreparedWatermark::tournament(packed, vocab_size, self.depth)
     }
 
     /// Device-preserving tournament transform; the host samples the returned weights.

@@ -391,6 +391,95 @@ fn candle_cpu_semstamp_matches_scalar_schemes() {
     semstamp_parity(&Device::Cpu);
 }
 
+fn changing_contexts(device: &Device) {
+    let vocab = 257;
+    let mut kgw_config = KgwConfig::new([91; 32], vocab);
+    kgw_config.context_width = 3;
+    let kgw = Kgw::new(&kgw_config).unwrap();
+    let mut mpac_config = MpacConfig::new([91; 32], vocab, 5);
+    mpac_config.context_width = 3;
+    mpac_config.radix = 7; // Uneven partition leaves tokens outside every group.
+    let mpac = Mpac::new(&mpac_config).unwrap();
+    let synthid = SynthIdText::new(&SynthIdConfig::new([91; 32])).unwrap();
+    let weights: Vec<f32> = (0..vocab).map(|i| (i % 17) as f32).collect();
+    let input = Tensor::new(weights.as_slice(), device).unwrap();
+    for step in 0..17 {
+        let context = [1, 5, 200, step];
+        let payload = [0, 1, 3, 6, (step % 7) as u8];
+        let mut reference = weights.clone();
+        kgw.apply(&mut reference, &context, 4).unwrap();
+        close(
+            &kgw.clone()
+                .prepare_tensor(&context, 4, device)
+                .unwrap()
+                .apply_trusted(&input)
+                .unwrap(),
+            &reference,
+            &input,
+            1e-6,
+        );
+        reference.clone_from(&weights);
+        mpac.apply(&mut reference, &context, 4, &payload).unwrap();
+        close(
+            &mpac
+                .prepare_tensor(&context, 4, &payload, device)
+                .unwrap()
+                .apply_trusted(&input)
+                .unwrap(),
+            &reference,
+            &input,
+            1e-6,
+        );
+        reference.clone_from(&weights);
+        synthid.apply(&mut reference, &context, 4).unwrap();
+        close(
+            &synthid
+                .prepare_tensor(vocab, &context, 4, device)
+                .unwrap()
+                .apply_trusted(&input)
+                .unwrap(),
+            &reference,
+            &input,
+            2e-5,
+        );
+    }
+    let mut config = SamplingConfig::new([91; 32], vocab);
+    config.sequence_len = 3;
+    let exponential = ExponentialRace::new(&config).unwrap();
+    let inverse = InverseTransform::new(&config).unwrap();
+    for position in [0, 1, 2, 3, 4, 8, usize::MAX] {
+        for (scores, expected) in [
+            (
+                exponential
+                    .prepare_tensor(position, device)
+                    .unwrap()
+                    .apply_trusted(&input)
+                    .unwrap(),
+                exponential.sample(&weights, position).unwrap(),
+            ),
+            (
+                inverse
+                    .clone()
+                    .prepare_tensor(position, device)
+                    .unwrap()
+                    .apply_trusted(&input)
+                    .unwrap(),
+                inverse.sample(&weights, position).unwrap(),
+            ),
+        ] {
+            assert_eq!(
+                scores.argmax(0).unwrap().to_scalar::<u32>().unwrap(),
+                expected
+            );
+        }
+    }
+}
+
+#[test]
+fn candle_cpu_changing_metadata() {
+    changing_contexts(&Device::Cpu);
+}
+
 #[cfg(feature = "metal")]
 #[test]
 #[ignore = "requires a Metal GPU; run with --features metal -- --ignored"]
@@ -401,6 +490,7 @@ fn candle_metal_parity() {
     extreme_probabilities(&device);
     sampling_parity(&device);
     semstamp_parity(&device);
+    changing_contexts(&device);
 }
 
 #[cfg(feature = "cuda")]
@@ -413,4 +503,5 @@ fn candle_cuda_parity() {
     extreme_probabilities(&device);
     sampling_parity(&device);
     semstamp_parity(&device);
+    changing_contexts(&device);
 }

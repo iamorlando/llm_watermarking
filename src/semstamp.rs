@@ -124,6 +124,8 @@ impl<E: std::error::Error + 'static> std::error::Error for SentenceSamplingError
 #[derive(Clone)]
 pub struct SemStamp {
     prefix: Sha256,
+    #[cfg(feature = "candle")]
+    tensor_seed: crate::device_metadata::Seed,
     normals: Vec<Vec<f64>>,
     embedding_dim: usize,
     region_count: usize,
@@ -160,6 +162,12 @@ impl SemStamp {
             .collect();
         let region_count = 1 << config.num_hyperplanes;
         Ok(Self {
+            #[cfg(feature = "candle")]
+            tensor_seed: crate::device_metadata::Seed::prefix(
+                HASH_DOMAIN,
+                &config.key,
+                &[config.embedding_dim, config.num_hyperplanes],
+            ),
             prefix,
             normals,
             embedding_dim: config.embedding_dim,

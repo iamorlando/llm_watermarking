@@ -14,8 +14,10 @@ inspected mistral-rs workspace:
 candle-core = { git = "https://github.com/huggingface/candle.git", rev = "66a8cf184a5a519671454066b1b9efd446ec9f5c", version = "0.11.0", default-features = false }
 ```
 
-Features are `candle`, `cuda = ["candle", "candle-core/cuda"]`, and
-`metal = ["candle", "candle-core/metal"]`. There is no separate GPU runtime,
+Features are `candle`, `cuda` (forwarding `candle-core/cuda`), and `metal`
+(forwarding `candle-core/metal` and enabling Candle's Metal kernel wrappers).
+The `candle-metal-kernels` package uses the same Git revision as `candle-core`.
+There is no separate GPU runtime,
 allocator, inference framework, or mistral-rs dependency in this crate. Its
 `candle_core` re-export exposes the exact dependency's types. The pinned dependency
 tree requires Rust 1.88, including `zip` and the CUDA loader's requirements.
@@ -161,21 +163,53 @@ acceptance or an explicit retry-limit fallback.
 Token detectors continue to accept host token IDs; they need no probability
 tensor or model inference. No watermark detector downloads full model weights.
 
-## What remains on CPU
+## Device metadata generation
 
-Key/context hashing, exact Fisher-Yates permutations, payload allocation, and
-SemStamp hyperplane generation use the existing CPU implementation. Preparation
-uploads only deterministic watermark metadata; transformations never download
-probability vectors. SynthID uploads packed g-value bytes and unpacks their bits
-with tensor arithmetic. This preserves the versioned hash formats without adding
-custom CUDA/Metal kernels or a second GPU stack.
+The tensor preparation paths use Candle `CustomOp1` backend hooks for the missing
+keyed primitives. CPU uses the existing Rust SHA-256 and Fisher–Yates implementation;
+CUDA and Metal use a shared watermark-specific SHA-256 kernel and exact shuffle.
+Candle owns the allocations, CUDA stream, Metal encoders and resource dependencies.
+No GPU probability or embedding vector is read back for metadata preparation.
 
-Preparation has CPU and upload costs proportional to the relevant metadata.
-Unigram masks and SemStamp hyperplanes can be reused across steps; other prepared
-operations can be reused for identical contexts or positions and speculative
-retries. This implementation does not claim GPU-resident keyed hashing or a
-fully asynchronous one-call path. A future hash optimization can use Candle's
-`CustomOp1` backend hooks without changing the host-facing boundary.
+| Scheme | Preparation on the target device | Reuse |
+| --- | --- | --- |
+| SynthID | Parallel candidate SHA-256, producing packed g-value bytes | Same context |
+| KGW | Parallel SHA-256 random stream, exact permutation, green mask | Same context |
+| Unigram | Exact permutation and fixed mask | Automatically cached per device |
+| MPAC | Exact permutation and payload group mask | Same context and payload |
+| Exponential race | Parallel candidate SHA-256 and F32 Gumbel values | Same wrapped sequence position |
+| Inverse transform | Exact permutation and inverse ranks | Automatically cached per device, across positions |
+| SemStamp | Exact previous-region permutation and membership mask | Hyperplanes reused through `PreparedSemStamp` |
+
+The fixed key/domain prefix is cached on each Candle device. Changing contexts or
+positions upload only their small seed suffix, not a vocabulary-sized mask or hash
+table. Clones share these caches. There is no growing cache of per-token contexts.
+Unigram and inverse-transform preparations reuse their device tensors automatically.
+Caller-retained prepared operations also support retries of identical steps.
+
+The kernels preserve the versioned hash inputs, byte order, unbiased integer
+rejection sampling and permutation order used by the scalar detectors. Random
+stream hashes and bounded choices run in parallel. The GPU reconstructs the exact
+Fisher–Yates result using per-target lists and increasing dependency chains,
+without executing all swaps serially. Atomic insertion order cannot change the
+result: each dependency selects the smallest eligible higher swap index. A rare
+rejected integer draw triggers an on-device serial repair of stream offsets;
+there is no CPU fallback or readback. Scratch storage is O(V); work depends on
+keyed list lengths and chain depths. No new partition format or detector is needed.
+Device residency alone does not guarantee a speedup; measure the target workload.
+
+Metal libraries/pipelines are compiled lazily and cached for each Candle device.
+CUDA compiles the small kernel source through Candle's re-exported NVRTC, caches
+the PTX, and loads it into the existing Candle CUDA device. CUDA therefore requires
+NVRTC at runtime in addition to Candle's build dependencies. Warm preparation
+before latency-sensitive generation to exclude first-use compilation costs.
+
+Host token-history validation, SynthID repeat checks, the single MPAC payload-slot
+choice and inverse-transform uniform remain CPU bookkeeping. SemStamp's reusable
+hyperplanes are generated once on CPU and uploaded during preparation. Scalar
+Unigram/inverse constructors also retain CPU partitions for their scalar APIs and
+detectors. None of these require per-step vocabulary-sized CPU uploads. Strict
+value validation still reads one status scalar; trusted applications avoid it.
 
 F32 accumulation, half-precision casts, GPU math, and parallel reductions can
 differ from the scalar f64 reference near ties, CDF cutoffs, or semantic region
@@ -210,9 +244,9 @@ not modify mistral-rs sampling plans or own that integration code.
 ```bash
 cargo test --features candle
 cargo check --features metal --all-targets
-cargo test --features metal --test candle_api candle_metal_parity -- --ignored
+cargo test --features metal -- --ignored
 cargo check --features cuda --all-targets
-cargo test --features cuda --test candle_api candle_cuda_parity -- --ignored
+cargo test --features cuda -- --ignored
 cargo run --features metal --example candle -- metal
 ```
 
@@ -222,3 +256,20 @@ compare all schemes with scalar references, verify device/dtype preservation,
 exercise strided inputs and errors, and test a realistic inverse-transform
 vocabulary size. Metal requires a supported macOS GPU; CUDA requires the Candle
 toolchain's CUDA dependencies and a compatible GPU.
+
+The ignored GPU tests also compare raw SHA-256 bytes and exact permutations across
+padding boundaries, offset seed tensors, changing contexts/payloads, period
+wrapping, distinct device instances (Metal), and a 32,769-token vocabulary.
+A forced-rejection Metal test exhausts the prefetched stream and verifies exact
+continuation. Floating-point sampling values are compared within tolerance.
+
+Measure warm preparation separately from inference with:
+
+```bash
+cargo run --release --features metal --example metadata_bench -- metal 32000 20
+cargo run --release --features cuda --example metadata_bench -- cuda 128000 20
+```
+
+This example compares CPU and the requested GPU, synchronizes after each step,
+and excludes first-use compilation/fixed preparation. It reports metadata latency,
+not end-to-end generation throughput. Benchmark the final host sampling path too.

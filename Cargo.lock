@@ -758,6 +758,8 @@ name = "llm-watermarking"
 version = "0.1.0"
 dependencies = [
  "candle-core",
+ "candle-metal-kernels",
+ "objc2-metal",
  "rand",
  "rand_isaac",
  "sha2",

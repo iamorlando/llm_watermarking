@@ -93,6 +93,8 @@ pub struct AlignmentDetection {
 #[derive(Clone)]
 pub(crate) struct SamplingCore {
     pub(crate) prefix: Sha256,
+    #[cfg(feature = "candle")]
+    pub(crate) tensor_seed: crate::device_metadata::Seed,
     pub(crate) vocab_size: usize,
     pub(crate) sequence_len: usize,
 }
@@ -101,6 +103,12 @@ impl SamplingCore {
     pub(crate) fn new(config: &SamplingConfig, domain: &[u8]) -> Result<Self, WatermarkError> {
         config.validate()?;
         Ok(Self {
+            #[cfg(feature = "candle")]
+            tensor_seed: crate::device_metadata::Seed::prefix(
+                domain,
+                &config.key,
+                &[config.vocab_size, config.sequence_len],
+            ),
             prefix: common::prefix(
                 domain,
                 &config.key,

@@ -55,6 +55,8 @@ impl fmt::Debug for KgwConfig {
 #[derive(Clone)]
 pub struct Kgw {
     prefix: Sha256,
+    #[cfg(feature = "candle")]
+    tensor_seed: crate::device_metadata::Seed,
     vocab_size: usize,
     context_width: usize,
     green_count: usize,
@@ -66,6 +68,12 @@ impl Kgw {
     pub fn new(config: &KgwConfig) -> Result<Self, WatermarkError> {
         config.validate()?;
         Ok(Self {
+            #[cfg(feature = "candle")]
+            tensor_seed: crate::device_metadata::Seed::prefix(
+                HASH_DOMAIN,
+                &config.key,
+                &[config.vocab_size, config.context_width],
+            ),
             prefix: common::prefix(
                 HASH_DOMAIN,
                 &config.key,
@@ -161,7 +169,11 @@ impl Kgw {
                 device,
             ));
         }
-        crate::tensor::PreparedWatermark::bias(self.mask(context), self.delta, device)
+        let seed = self
+            .tensor_seed
+            .context(&context[context.len() - self.context_width..], device)?;
+        let mask = crate::device_metadata::green_mask(&seed, self.vocab_size, self.green_count)?;
+        crate::tensor::PreparedWatermark::bias(mask, self.delta)
     }
 
     pub fn apply_tensor(

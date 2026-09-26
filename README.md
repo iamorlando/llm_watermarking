@@ -34,14 +34,20 @@ workspace's exact package identity. There is no dependency on mistral-rs itself.
 The host must call after probability filters and before token selection; its
 existing pre-filter logits processor is not that insertion point.
 
-Probability math uses Candle operations. Keyed hashes, permutations, and context
-bookkeeping are currently prepared on CPU and uploaded as metadata. Probability
-vectors are never downloaded for transformation. Strict calls read one validation
-status scalar; prepared `apply_trusted` calls avoid that synchronization when the
-host guarantees valid weights. This is not an all-GPU hashing implementation.
+Probability math uses Candle operations. Watermark-specific Candle custom operations
+compute vocabulary-wide SHA-256 values and exact keyed permutations on the input
+device, including CUDA and Metal. Keys and fixed metadata are cached per device;
+changing contexts upload only small seed suffixes. Probability vectors are never
+downloaded for transformation. Strict calls read one validation status scalar;
+prepared `apply_trusted` calls avoid that synchronization when the host guarantees
+valid weights. Small host context/scalar bookkeeping and one-time SemStamp
+hyperplane generation remain on CPU. The GPU reconstructs the exact Fisher–Yates
+permutation in parallel; GPU residency alone is not a blanket speedup claim.
 
 See [the tensor API and mistral-rs integration boundary](docs/candle.md),
 [the runnable example](examples/candle.rs), and [backend parity tests](tests/candle_api.rs).
+[Metadata timing example](examples/metadata_bench.rs):
+`cargo run --release --features metal --example metadata_bench -- metal 32000 20`.
 
 | Scheme | Generation | Detection | Example |
 | --- | --- | --- | --- |
@@ -154,8 +160,9 @@ hashed exactly as provided, including any terminating zero byte. Generation and
 detection must use the same domain. The default is exported as `synthid::HASH_DOMAIN`.
 
 This keyed-hash implementation does not reproduce private provider configurations
-or the public Transformers sampling-table format. Computation runs on CPU, with
-tournament work proportional to the number of surviving tokens times depth.
+or the public Transformers sampling-table format. The scalar API runs on CPU,
+with tournament work proportional to surviving tokens times depth. The Candle
+API hashes vocabulary candidates and transforms their weights on the input device.
 
 ## KGW and Unigram
 

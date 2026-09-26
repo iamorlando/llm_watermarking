@@ -73,6 +73,8 @@ pub struct MpacDetection {
 #[derive(Clone)]
 pub struct Mpac {
     prefix: Sha256,
+    #[cfg(feature = "candle")]
+    tensor_seed: crate::device_metadata::Seed,
     vocab_size: usize,
     payload_len: usize,
     radix: usize,
@@ -85,6 +87,17 @@ impl Mpac {
     pub fn new(config: &MpacConfig) -> Result<Self, WatermarkError> {
         config.validate()?;
         Ok(Self {
+            #[cfg(feature = "candle")]
+            tensor_seed: crate::device_metadata::Seed::prefix(
+                HASH_DOMAIN,
+                &config.key,
+                &[
+                    config.vocab_size,
+                    config.context_width,
+                    config.payload_len,
+                    config.radix,
+                ],
+            ),
             prefix: common::prefix(
                 HASH_DOMAIN,
                 &config.key,
@@ -239,12 +252,19 @@ impl Mpac {
                 device,
             ));
         }
-        let (position, groups) = self.allocation(context);
-        let mask = groups
-            .into_iter()
-            .map(|group| group == payload[position] as usize)
-            .collect();
-        crate::tensor::PreparedWatermark::bias(mask, self.delta, device)
+        let context = &context[context.len() - self.context_width..];
+        // A single payload slot is host metadata; the vocabulary allocation is
+        // generated on device without downloading ranks or uploading a mask.
+        let hash = common::context_hash(&self.prefix, context);
+        let position = common::HashRng::new(&hash, 1).below(self.payload_len);
+        let seed = self.tensor_seed.context(context, device)?;
+        let (_, ranks) = crate::device_metadata::permutation(&seed, self.vocab_size)?;
+        let group_size = self.vocab_size / self.radix;
+        let start = payload[position] as usize * group_size;
+        let mask = ranks
+            .ge(start as u32)?
+            .mul(&ranks.lt((start + group_size) as u32)?)?;
+        crate::tensor::PreparedWatermark::bias(mask, self.delta)
     }
 
     pub fn apply_tensor(

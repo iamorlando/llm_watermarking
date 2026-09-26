@@ -48,6 +48,10 @@ impl fmt::Debug for UnigramConfig {
 #[derive(Clone)]
 pub struct Unigram {
     mask: Vec<bool>,
+    #[cfg(feature = "candle")]
+    tensor_seed: crate::device_metadata::Seed,
+    #[cfg(feature = "candle")]
+    tensor_masks: crate::device_metadata::DeviceCache<candle_core::Tensor>,
     green_count: usize,
     delta: f64,
     deduplicate: bool,
@@ -60,6 +64,14 @@ impl Unigram {
         let prefix = common::prefix(HASH_DOMAIN, &config.key, &[config.vocab_size]);
         Ok(Self {
             mask: common::green_mask(&prefix, config.vocab_size, green_count),
+            #[cfg(feature = "candle")]
+            tensor_seed: crate::device_metadata::Seed::prefix(
+                HASH_DOMAIN,
+                &config.key,
+                &[config.vocab_size],
+            ),
+            #[cfg(feature = "candle")]
+            tensor_masks: crate::device_metadata::DeviceCache::default(),
             green_count,
             delta: config.delta,
             deduplicate: config.ignore_repeated_tokens,
@@ -119,7 +131,11 @@ impl Unigram {
         &self,
         device: &candle_core::Device,
     ) -> candle_core::Result<crate::tensor::PreparedWatermark> {
-        crate::tensor::PreparedWatermark::bias(self.mask.clone(), self.delta, device)
+        let mask = self.tensor_masks.get(device, || {
+            let seed = self.tensor_seed.tensor(&[], device)?;
+            crate::device_metadata::green_mask(&seed, self.mask.len(), self.green_count)
+        })?;
+        crate::tensor::PreparedWatermark::bias(mask, self.delta)
     }
 
     pub fn apply_tensor(

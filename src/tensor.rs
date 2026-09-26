@@ -100,30 +100,18 @@ impl PreparedWatermark {
         }
     }
 
-    pub(crate) fn bias(mask: Vec<bool>, delta: f64, device: &Device) -> Result<Self> {
-        let vocab_size = mask.len();
-        let mask = Tensor::from_vec(
-            mask.into_iter().map(u8::from).collect::<Vec<_>>(),
-            vocab_size,
-            device,
-        )?;
+    pub(crate) fn bias(mask: Tensor, delta: f64) -> Result<Self> {
         Ok(Self {
-            vocab_size,
-            device: device.clone(),
+            vocab_size: mask.dims1()?,
+            device: mask.device().clone(),
             operation: Reweighting::Bias { mask, delta },
         })
     }
 
-    pub(crate) fn tournament(
-        bits: Vec<u8>,
-        vocab_size: usize,
-        depth: usize,
-        device: &Device,
-    ) -> Result<Self> {
-        let bits = Tensor::from_vec(bits, (depth.div_ceil(8), vocab_size), device)?;
+    pub(crate) fn tournament(bits: Tensor, vocab_size: usize, depth: usize) -> Result<Self> {
         Ok(Self {
             vocab_size,
-            device: device.clone(),
+            device: bits.device().clone(),
             operation: Reweighting::Tournament { bits, depth },
         })
     }
@@ -175,39 +163,22 @@ impl PreparedWatermark {
 }
 
 impl PreparedSampler {
-    pub(crate) fn exponential(gumbels: Vec<f32>, device: &Device) -> Result<Self> {
-        let vocab_size = gumbels.len();
-        let gumbels = Tensor::from_vec(gumbels, vocab_size, device)?;
+    pub(crate) fn exponential(gumbels: Tensor) -> Result<Self> {
         Ok(Self {
-            vocab_size,
-            device: device.clone(),
+            vocab_size: gumbels.dims1()?,
+            device: gumbels.device().clone(),
             operation: Selection::Exponential { gumbels },
         })
     }
 
-    pub(crate) fn inverse(
-        order: &[usize],
-        ranks: &[usize],
-        uniform: f64,
-        device: &Device,
-    ) -> Result<Self> {
-        let vocab_size = order.len();
+    pub(crate) fn inverse(order: Tensor, ranks: Tensor, uniform: f64) -> Result<Self> {
+        let vocab_size = order.dims1()?;
         if vocab_size > MAX_INVERSE_TENSOR_VOCAB {
             candle_core::bail!("inverse-transform tensor vocabulary exceeds the F32 rank limit of {MAX_INVERSE_TENSOR_VOCAB}");
         }
-        let order = Tensor::from_vec(
-            order.iter().map(|&i| i as u32).collect::<Vec<_>>(),
-            vocab_size,
-            device,
-        )?;
-        let ranks = Tensor::from_vec(
-            ranks.iter().map(|&i| i as u32).collect::<Vec<_>>(),
-            vocab_size,
-            device,
-        )?;
         Ok(Self {
             vocab_size,
-            device: device.clone(),
+            device: order.device().clone(),
             operation: Selection::Inverse {
                 order,
                 ranks,

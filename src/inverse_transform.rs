@@ -14,6 +14,9 @@ pub struct InverseTransform {
     core: SamplingCore,
     order: Vec<usize>,
     ranks: Vec<usize>,
+    #[cfg(feature = "candle")]
+    tensor_permutation:
+        crate::device_metadata::DeviceCache<(candle_core::Tensor, candle_core::Tensor)>,
 }
 
 impl InverseTransform {
@@ -24,7 +27,13 @@ impl InverseTransform {
         for (rank, &token) in order.iter().enumerate() {
             ranks[token] = rank;
         }
-        Ok(Self { core, order, ranks })
+        Ok(Self {
+            core,
+            order,
+            ranks,
+            #[cfg(feature = "candle")]
+            tensor_permutation: crate::device_metadata::DeviceCache::default(),
+        })
     }
 
     fn uniform(&self, position: usize) -> f64 {
@@ -99,12 +108,14 @@ impl InverseTransform {
         position: usize,
         device: &candle_core::Device,
     ) -> candle_core::Result<crate::tensor::PreparedSampler> {
-        crate::tensor::PreparedSampler::inverse(
-            &self.order,
-            &self.ranks,
-            self.uniform(position),
-            device,
-        )
+        if self.core.vocab_size > crate::tensor::MAX_INVERSE_TENSOR_VOCAB {
+            candle_core::bail!("inverse-transform tensor vocabulary exceeds the F32 rank limit");
+        }
+        let (order, ranks) = self.tensor_permutation.get(device, || {
+            let seed = self.core.tensor_seed.tensor(&[], device)?;
+            crate::device_metadata::permutation(&seed, self.core.vocab_size)
+        })?;
+        crate::tensor::PreparedSampler::inverse(order, ranks, self.uniform(position))
     }
 
     /// F32 scores selecting the first occupied CDF interval above the keyed

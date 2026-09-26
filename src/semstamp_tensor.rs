@@ -154,14 +154,14 @@ impl PreparedSemStamp {
         if signatures.elem_count() == 0 {
             return Tensor::zeros(signatures.shape(), DType::U8, candidates.device());
         }
-        let mask = Tensor::from_vec(
-            self.watermark
-                .mask(previous_signature)
-                .into_iter()
-                .map(u8::from)
-                .collect::<Vec<_>>(),
+        let seed = self
+            .watermark
+            .tensor_seed
+            .context(&[previous_signature], candidates.device())?;
+        let mask = crate::device_metadata::green_mask(
+            &seed,
             self.watermark.region_count,
-            candidates.device(),
+            self.watermark.green_count,
         )?;
         let valid = mask
             .index_select(&signatures.flatten_all()?, 0)?
