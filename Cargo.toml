@@ -2,7 +2,7 @@
 name = "llm-watermarking"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 description = "Model-independent text watermarking algorithms in Rust"
 license = "MIT"
 readme = "README.md"
@@ -11,7 +11,18 @@ categories = ["algorithms", "text-processing"]
 
 [dependencies]
 sha2 = "0.10.9"
+candle-core = { git = "https://github.com/huggingface/candle.git", rev = "66a8cf184a5a519671454066b1b9efd446ec9f5c", version = "0.11.0", default-features = false, optional = true }
+
+[features]
+default = []
+candle = ["dep:candle-core"]
+cuda = ["candle", "candle-core/cuda"]
+metal = ["candle", "candle-core/metal"]
 
 [dev-dependencies]
 rand = "0.9.3"
 rand_isaac = "0.4.0"
+
+[[example]]
+name = "candle"
+required-features = ["candle"]

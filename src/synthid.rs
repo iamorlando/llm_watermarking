@@ -192,6 +192,57 @@ impl SynthIdText {
     }
 }
 
+#[cfg(feature = "candle")]
+impl SynthIdText {
+    /// Prepare key/context metadata on the requested device. Does not read model weights.
+    pub fn prepare_tensor(
+        &self,
+        vocab_size: usize,
+        context: &[u32],
+        prompt_len: usize,
+        device: &candle_core::Device,
+    ) -> candle_core::Result<crate::tensor::PreparedWatermark> {
+        use crate::tensor::PreparedWatermark;
+        if prompt_len > context.len() {
+            return Err(candle_core::Error::wrap(
+                WatermarkError::PromptLengthExceedsContext,
+            ));
+        }
+        if vocab_size == 0 || vocab_size > u32::MAX as usize {
+            candle_core::bail!("SynthID tensor vocabulary size must be in 1..=u32::MAX");
+        }
+        if context.len() < self.context_len || self.repeated_context(context, prompt_len) {
+            return Ok(PreparedWatermark::identity(vocab_size, device));
+        }
+        let hash = self.context_hash(&context[context.len() - self.context_len..]);
+        let bytes = self.depth.div_ceil(8);
+        let mut packed = vec![0u8; bytes * vocab_size];
+        for token in 0..vocab_size {
+            let values = Self::g_values(&hash, token as u32);
+            for byte in 0..bytes {
+                packed[byte * vocab_size + token] = values[byte];
+            }
+        }
+        PreparedWatermark::tournament(packed, vocab_size, self.depth, device)
+    }
+
+    /// Device-preserving tournament transform; the host samples the returned weights.
+    pub fn apply_tensor(
+        &self,
+        probabilities: &candle_core::Tensor,
+        context: &[u32],
+        prompt_len: usize,
+    ) -> candle_core::Result<candle_core::Tensor> {
+        self.prepare_tensor(
+            probabilities.dims1()?,
+            context,
+            prompt_len,
+            probabilities.device(),
+        )?
+        .apply(probabilities)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

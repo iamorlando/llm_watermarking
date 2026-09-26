@@ -9,6 +9,12 @@ use crate::{common, WatermarkError};
 
 pub const HASH_DOMAIN: &[u8] = b"llm-watermarking-semstamp-v1\0";
 
+#[cfg(feature = "candle")]
+#[path = "semstamp_tensor.rs"]
+mod tensor_impl;
+#[cfg(feature = "candle")]
+pub use tensor_impl::PreparedSemStamp;
+
 #[derive(Clone)]
 pub struct SemStampConfig {
     pub key: [u8; 32],
@@ -267,6 +273,17 @@ impl SemStamp {
             .iter()
             .map(|e| self.signature(e.as_ref()))
             .collect::<Result<_, _>>()?;
+        self.detect_signatures(&signatures, prompt_len)
+    }
+
+    fn detect_signatures(
+        &self,
+        signatures: &[u32],
+        prompt_len: usize,
+    ) -> Result<SemStampDetection, WatermarkError> {
+        if prompt_len > signatures.len() {
+            return Err(WatermarkError::PromptLengthExceedsContext);
+        }
         let mut seen = HashSet::new();
         let (mut trials, mut successes) = (0, 0);
         for i in prompt_len.max(1)..signatures.len() {

@@ -37,7 +37,7 @@ impl InverseTransform {
             .abs()
     }
 
-    /// Sample the CDF in the keyed vocabulary order using U[position]. Input
+    /// Sample the CDF in the keyed vocabulary order using `U[position]`. Input
     /// weights need not sum to one. Zero-weight intervals are always skipped.
     pub fn sample(&self, probs: &[f32], position: usize) -> Result<u32, WatermarkError> {
         let total = common::weights(probs, self.core.vocab_size)?;
@@ -89,5 +89,32 @@ impl InverseTransform {
             config,
             |token, position| self.cost(token, position),
         )
+    }
+}
+
+#[cfg(feature = "candle")]
+impl InverseTransform {
+    pub fn prepare_tensor(
+        &self,
+        position: usize,
+        device: &candle_core::Device,
+    ) -> candle_core::Result<crate::tensor::PreparedSampler> {
+        crate::tensor::PreparedSampler::inverse(
+            &self.order,
+            &self.ranks,
+            self.uniform(position),
+            device,
+        )
+    }
+
+    /// F32 scores selecting the first occupied CDF interval above the keyed
+    /// uniform. The host selects argmax; these are not categorical weights.
+    pub fn selection_scores_tensor(
+        &self,
+        probabilities: &candle_core::Tensor,
+        position: usize,
+    ) -> candle_core::Result<candle_core::Tensor> {
+        self.prepare_tensor(position, probabilities.device())?
+            .apply(probabilities)
     }
 }

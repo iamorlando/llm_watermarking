@@ -111,3 +111,22 @@ impl Unigram {
         ))
     }
 }
+
+#[cfg(feature = "candle")]
+impl Unigram {
+    /// Prepare once per device; this partition is reusable across all contexts.
+    pub fn prepare_tensor(
+        &self,
+        device: &candle_core::Device,
+    ) -> candle_core::Result<crate::tensor::PreparedWatermark> {
+        crate::tensor::PreparedWatermark::bias(self.mask.clone(), self.delta, device)
+    }
+
+    pub fn apply_tensor(
+        &self,
+        probabilities: &candle_core::Tensor,
+    ) -> candle_core::Result<candle_core::Tensor> {
+        self.prepare_tensor(probabilities.device())?
+            .apply(probabilities)
+    }
+}

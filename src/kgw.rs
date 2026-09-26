@@ -145,3 +145,32 @@ impl Kgw {
         ))
     }
 }
+
+#[cfg(feature = "candle")]
+impl Kgw {
+    pub fn prepare_tensor(
+        &self,
+        context: &[u32],
+        prompt_len: usize,
+        device: &candle_core::Device,
+    ) -> candle_core::Result<crate::tensor::PreparedWatermark> {
+        common::context(context, prompt_len, self.vocab_size).map_err(candle_core::Error::wrap)?;
+        if context.len() < self.context_width {
+            return Ok(crate::tensor::PreparedWatermark::identity(
+                self.vocab_size,
+                device,
+            ));
+        }
+        crate::tensor::PreparedWatermark::bias(self.mask(context), self.delta, device)
+    }
+
+    pub fn apply_tensor(
+        &self,
+        probabilities: &candle_core::Tensor,
+        context: &[u32],
+        prompt_len: usize,
+    ) -> candle_core::Result<candle_core::Tensor> {
+        self.prepare_tensor(context, prompt_len, probabilities.device())?
+            .apply(probabilities)
+    }
+}

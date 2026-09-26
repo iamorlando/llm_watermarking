@@ -30,7 +30,7 @@ impl ExponentialRace {
         common::HashRng::new(&hash, 2).uniform()
     }
 
-    /// Return argmin(-ln(U[token]) / weight[token]); zero weights never win.
+    /// Return `argmin(-ln(U[token]) / weight[token])`; zero weights never win.
     /// `position` is the key-stream index, not an index including prompt tokens.
     /// Replaying the same position and weights returns the same token.
     pub fn sample(&self, probs: &[f32], position: usize) -> Result<u32, WatermarkError> {
@@ -82,5 +82,29 @@ impl ExponentialRace {
             config,
             |token, position| -self.uniform(position, token).ln(),
         )
+    }
+}
+
+#[cfg(feature = "candle")]
+impl ExponentialRace {
+    pub fn prepare_tensor(
+        &self,
+        position: usize,
+        device: &candle_core::Device,
+    ) -> candle_core::Result<crate::tensor::PreparedSampler> {
+        let gumbels = (0..self.core.vocab_size)
+            .map(|token| (-(-self.uniform(position, token as u32).ln()).ln()) as f32)
+            .collect();
+        crate::tensor::PreparedSampler::exponential(gumbels, device)
+    }
+
+    /// F32 Gumbel-max scores. The host selects argmax, not a categorical draw.
+    pub fn selection_scores_tensor(
+        &self,
+        probabilities: &candle_core::Tensor,
+        position: usize,
+    ) -> candle_core::Result<candle_core::Tensor> {
+        self.prepare_tensor(position, probabilities.device())?
+            .apply(probabilities)
     }
 }

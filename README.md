@@ -6,8 +6,42 @@ operates on caller-supplied sentence embeddings. The host owns tokenization,
 model inference, sampling filters, sentence segmentation, embedding models,
 serialization, and language or HTTP bindings.
 
-The only runtime dependency is `sha2`. Algorithm errors implement
-`std::error::Error`; no tensor framework or inference engine is required.
+The scalar API's only runtime dependency is `sha2`. Optional Candle tensor APIs
+run watermark operations on CPU, CUDA, or Metal while preserving the input device.
+Algorithm errors implement `std::error::Error`; no inference engine is required.
+Rust 1.88 or newer is required by the pinned Candle dependency tree.
+
+## Candle and GPU integration
+
+Enable `candle` for CPU tensors, `cuda` for Candle CUDA support, or `metal` for
+Candle Metal support. GPU features imply `candle`. The default feature set remains
+empty, so scalar-only users do not compile Candle.
+
+```toml
+[dependencies]
+llm-watermarking = { path = "../llm_watermarking", features = ["metal"] }
+```
+
+`SynthIdText`, `Kgw`, `Unigram`, and `Mpac` expose `apply_tensor` returning
+probabilities on the input device. Exponential-race and inverse-transform expose
+`selection_scores_tensor`, whose output the host selects by **argmax**, not a
+categorical draw. SemStamp provides tensor embedding projection and acceptance
+masks. Prepared operations cache keyed metadata for reuse on the same device.
+
+The optional `candle-core` dependency pins Git revision
+`66a8cf184a5a519671454066b1b9efd446ec9f5c`, matching the inspected mistral-rs
+workspace's exact package identity. There is no dependency on mistral-rs itself.
+The host must call after probability filters and before token selection; its
+existing pre-filter logits processor is not that insertion point.
+
+Probability math uses Candle operations. Keyed hashes, permutations, and context
+bookkeeping are currently prepared on CPU and uploaded as metadata. Probability
+vectors are never downloaded for transformation. Strict calls read one validation
+status scalar; prepared `apply_trusted` calls avoid that synchronization when the
+host guarantees valid weights. This is not an all-GPU hashing implementation.
+
+See [the tensor API and mistral-rs integration boundary](docs/candle.md),
+[the runnable example](examples/candle.rs), and [backend parity tests](tests/candle_api.rs).
 
 | Scheme | Generation | Detection | Example |
 | --- | --- | --- | --- |
@@ -338,6 +372,14 @@ cargo run --example exponential
 cargo run --example inverse_transform
 cargo run --example mpac
 cargo run --example semstamp
+cargo test --features candle
+cargo run --features candle --example candle
+# On a machine with a Metal GPU and the Metal feature's platform requirements:
+cargo test --features metal --test candle_api candle_metal_parity -- --ignored
+cargo run --features metal --example candle -- metal
+# On a machine with a CUDA toolkit and GPU:
+cargo test --features cuda --test candle_api candle_cuda_parity -- --ignored
+cargo run --features cuda --example candle -- cuda
 ```
 
 The examples use synthetic distributions or embeddings without loading models.

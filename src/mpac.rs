@@ -220,3 +220,41 @@ impl Mpac {
         ))
     }
 }
+
+#[cfg(feature = "candle")]
+impl Mpac {
+    pub fn prepare_tensor(
+        &self,
+        context: &[u32],
+        prompt_len: usize,
+        payload: &[u8],
+        device: &candle_core::Device,
+    ) -> candle_core::Result<crate::tensor::PreparedWatermark> {
+        self.validate_payload(payload)
+            .map_err(candle_core::Error::wrap)?;
+        common::context(context, prompt_len, self.vocab_size).map_err(candle_core::Error::wrap)?;
+        if context.len() < self.context_width {
+            return Ok(crate::tensor::PreparedWatermark::identity(
+                self.vocab_size,
+                device,
+            ));
+        }
+        let (position, groups) = self.allocation(context);
+        let mask = groups
+            .into_iter()
+            .map(|group| group == payload[position] as usize)
+            .collect();
+        crate::tensor::PreparedWatermark::bias(mask, self.delta, device)
+    }
+
+    pub fn apply_tensor(
+        &self,
+        probabilities: &candle_core::Tensor,
+        context: &[u32],
+        prompt_len: usize,
+        payload: &[u8],
+    ) -> candle_core::Result<candle_core::Tensor> {
+        self.prepare_tensor(context, prompt_len, payload, probabilities.device())?
+            .apply(probabilities)
+    }
+}

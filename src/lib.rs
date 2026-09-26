@@ -10,7 +10,12 @@ pub mod mpac;
 pub mod sampling;
 pub mod semstamp;
 pub mod synthid;
+#[cfg(feature = "candle")]
+pub mod tensor;
 pub mod unigram;
+
+#[cfg(feature = "candle")]
+pub use candle_core;
 
 pub use error::WatermarkError;
 
