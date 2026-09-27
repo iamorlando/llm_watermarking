@@ -159,3 +159,20 @@ impl Unigram {
             .indexed(candidates)
     }
 }
+
+impl Unigram {
+    /// Capture the fixed green mask and authoritative scalar input/output weights.
+    pub fn apply_traced(
+        &self,
+        probs: &mut [f32],
+        options: &crate::trace::TraceOptions,
+    ) -> Result<crate::trace::ScalarSamplingTrace, WatermarkError> {
+        options.validate()?;
+        common::weights(probs, self.mask.len())?;
+        Ok(crate::trace::ScalarSamplingTrace::bias(
+            probs,
+            self.mask.clone(),
+            self.delta,
+        ))
+    }
+}

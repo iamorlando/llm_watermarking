@@ -30,6 +30,8 @@ pub enum WatermarkError {
     EmbeddingDimensionMismatch { expected: usize, actual: usize },
     InvalidEmbedding { index: usize },
     ZeroEmbedding,
+    InvalidTraceOptions,
+    TraceTooLarge,
 }
 
 impl fmt::Display for WatermarkError {
@@ -92,6 +94,10 @@ impl fmt::Display for WatermarkError {
                 write!(f, "embedding component at index {index} must be finite")
             }
             Self::ZeroEmbedding => f.write_str("embedding must have nonzero norm"),
+            Self::InvalidTraceOptions => f.write_str("trace max_layers must be between 0 and 256"),
+            Self::TraceTooLarge => {
+                f.write_str("trace snapshot exceeds row or element bounds (or is empty)")
+            }
         }
     }
 }

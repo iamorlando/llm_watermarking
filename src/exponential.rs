@@ -152,3 +152,49 @@ impl ExponentialRace {
         ))
     }
 }
+
+impl ExponentialRace {
+    /// Same token as `sample`, with negative race costs for optional inspection.
+    /// These scores are for argmax and must not be treated as probabilities.
+    pub fn sample_traced(
+        &self,
+        probs: &[f32],
+        position: usize,
+        options: &crate::trace::TraceOptions,
+    ) -> Result<(u32, crate::trace::ScalarSamplingTrace), WatermarkError> {
+        use crate::trace::{
+            ScalarMetadata, ScalarSamplingTrace, SelectionScoreKind, TraceKind, TraceStatus,
+        };
+        options.validate()?;
+        common::weights(probs, self.core.vocab_size)?;
+        let mut best = f64::INFINITY;
+        let mut winner = 0;
+        let mut scores = vec![f64::NEG_INFINITY; probs.len()];
+        for (token, &prob) in probs.iter().enumerate() {
+            if prob > 0.0 {
+                let race = -self.uniform(position, token as u32).ln() / f64::from(prob);
+                scores[token] = -race;
+                if race < best {
+                    best = race;
+                    winner = token as u32;
+                }
+            }
+        }
+        Ok((
+            winner,
+            ScalarSamplingTrace {
+                input: probs.to_vec(),
+                output: None,
+                kind: TraceKind::ExponentialRace,
+                status: TraceStatus::Applied,
+                metadata: ScalarMetadata::Selection {
+                    scores,
+                    kind: SelectionScoreKind::NegativeExponentialCost,
+                    selected: winner,
+                    position: position % self.core.sequence_len,
+                    inverse: None,
+                },
+            },
+        ))
+    }
+}

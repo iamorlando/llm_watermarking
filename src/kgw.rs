@@ -221,3 +221,29 @@ impl Kgw {
         )
     }
 }
+
+impl Kgw {
+    /// Opt-in scalar diagnostics. The ordinary `apply` path is unchanged.
+    pub fn apply_traced(
+        &self,
+        probs: &mut [f32],
+        context: &[u32],
+        prompt_len: usize,
+        options: &crate::trace::TraceOptions,
+    ) -> Result<crate::trace::ScalarSamplingTrace, WatermarkError> {
+        options.validate()?;
+        common::context(context, prompt_len, self.vocab_size)?;
+        common::weights(probs, self.vocab_size)?;
+        if context.len() < self.context_width {
+            return Ok(crate::trace::ScalarSamplingTrace::identity(
+                probs,
+                crate::trace::TraceStatus::Warmup,
+            ));
+        }
+        Ok(crate::trace::ScalarSamplingTrace::bias(
+            probs,
+            self.mask(context),
+            self.delta,
+        ))
+    }
+}

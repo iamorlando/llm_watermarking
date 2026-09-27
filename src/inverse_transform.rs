@@ -167,3 +167,70 @@ impl InverseTransform {
         )
     }
 }
+
+impl InverseTransform {
+    /// Same token as `sample`, with eligible negative-rank selection scores.
+    /// The full keyed CDF is used even when a later snapshot observes a subset.
+    pub fn sample_traced(
+        &self,
+        probs: &[f32],
+        position: usize,
+        options: &crate::trace::TraceOptions,
+    ) -> Result<(u32, crate::trace::ScalarSamplingTrace), WatermarkError> {
+        use crate::trace::{
+            ScalarMetadata, ScalarSamplingTrace, SelectionScoreKind, TraceKind, TraceStatus,
+        };
+        options.validate()?;
+        let total = common::weights(probs, self.core.vocab_size)?;
+        let uniform = self.uniform(position);
+        let target = uniform * total;
+        let mut cdf_lower = vec![0.0; probs.len()];
+        let mut cdf_upper = vec![0.0; probs.len()];
+        let mut cumulative = 0.0;
+        let mut winner = None;
+        let mut last_positive = 0;
+        let mut scores = vec![f64::NEG_INFINITY; probs.len()];
+        for (rank, &token) in self.order.iter().enumerate() {
+            cdf_lower[token] = cumulative;
+            if probs[token] > 0.0 {
+                last_positive = token as u32;
+                cumulative += f64::from(probs[token]);
+                if target < cumulative {
+                    if winner.is_none() {
+                        winner = Some(token as u32);
+                    }
+                    scores[token] = -(rank as f64);
+                }
+            }
+            cdf_upper[token] = cumulative;
+        }
+        let winner = winner.unwrap_or(last_positive);
+        // Match the scalar endpoint fallback even in an extreme rounding case.
+        if !scores[winner as usize].is_finite() {
+            scores[winner as usize] = -(self.ranks[winner as usize] as f64);
+        }
+        Ok((
+            winner,
+            ScalarSamplingTrace {
+                input: probs.to_vec(),
+                output: None,
+                kind: TraceKind::InverseTransform,
+                status: TraceStatus::Applied,
+                metadata: ScalarMetadata::Selection {
+                    scores,
+                    kind: SelectionScoreKind::NegativeRank,
+                    selected: winner,
+                    position: position % self.core.sequence_len,
+                    inverse: Some(crate::trace::ScalarInverseMetadata {
+                        uniform,
+                        threshold: target,
+                        total_weight: total,
+                        ranks: self.ranks.clone(),
+                        cdf_lower,
+                        cdf_upper,
+                    }),
+                },
+            },
+        ))
+    }
+}

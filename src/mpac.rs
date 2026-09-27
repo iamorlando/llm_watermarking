@@ -326,3 +326,36 @@ impl Mpac {
         )
     }
 }
+
+impl Mpac {
+    /// Capture the favored payload color mask. Its complement means unfavored,
+    /// not a binary red colorlist; MPAC can have more than two colors and a remainder.
+    pub fn apply_traced(
+        &self,
+        probs: &mut [f32],
+        context: &[u32],
+        prompt_len: usize,
+        payload: &[u8],
+        options: &crate::trace::TraceOptions,
+    ) -> Result<crate::trace::ScalarSamplingTrace, WatermarkError> {
+        options.validate()?;
+        self.validate_payload(payload)?;
+        common::context(context, prompt_len, self.vocab_size)?;
+        common::weights(probs, self.vocab_size)?;
+        if context.len() < self.context_width {
+            return Ok(crate::trace::ScalarSamplingTrace::identity(
+                probs,
+                crate::trace::TraceStatus::Warmup,
+            ));
+        }
+        let (position, groups) = self.allocation(context);
+        let mask = groups
+            .iter()
+            .map(|&group| group == payload[position] as usize)
+            .collect();
+        Ok(
+            crate::trace::ScalarSamplingTrace::bias(probs, mask, self.delta)
+                .with_payload(position, payload[position]),
+        )
+    }
+}

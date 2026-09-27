@@ -299,6 +299,76 @@ impl SynthIdText {
     }
 }
 
+impl SynthIdText {
+    /// Capture tournament reductions while executing exactly the scalar update.
+    /// Snapshot candidate details later, without recording imaginary brackets.
+    pub fn apply_traced(
+        &self,
+        probs: &mut [f32],
+        context: &[u32],
+        prompt_len: usize,
+        options: &crate::trace::TraceOptions,
+    ) -> Result<crate::trace::ScalarSamplingTrace, WatermarkError> {
+        use crate::trace::{
+            ScalarMetadata, ScalarReduction, ScalarSamplingTrace, TraceKind, TraceStatus,
+        };
+        options.validate()?;
+        if prompt_len > context.len() {
+            return Err(WatermarkError::PromptLengthExceedsContext);
+        }
+        crate::common::weights(probs, probs.len())?;
+        if context.len() < self.context_len {
+            return Ok(ScalarSamplingTrace::identity(probs, TraceStatus::Warmup));
+        }
+        if self.repeated_context(context, prompt_len) {
+            return Ok(ScalarSamplingTrace::identity(
+                probs,
+                TraceStatus::RepeatedContext,
+            ));
+        }
+        let input = probs.to_vec();
+        let hash = self.context_hash(&context[context.len() - self.context_len..]);
+        let mut candidates: Vec<_> = probs
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| **p > 0.0)
+            .map(|(token, prob)| (token, f64::from(*prob), Self::g_values(&hash, token as u32)))
+            .collect();
+        let mut reductions = Vec::with_capacity(self.depth.min(options.max_layers));
+        for layer in 0..self.depth {
+            let total: f64 = candidates.iter().map(|(_, prob, _)| prob).sum();
+            let g_mass = candidates
+                .iter()
+                .map(|(_, prob, values)| prob * Self::g_value(values, layer))
+                .sum::<f64>()
+                / total;
+            if layer < options.max_layers {
+                reductions.push(ScalarReduction {
+                    total_before: total,
+                    green_mass: g_mass,
+                });
+            }
+            for (_, prob, values) in &mut candidates {
+                *prob = (*prob / total) * (1.0 + Self::g_value(values, layer) - g_mass);
+            }
+        }
+        for (token, prob, _) in candidates {
+            probs[token] = prob as f32;
+        }
+        Ok(ScalarSamplingTrace {
+            input,
+            output: Some(probs.to_vec()),
+            kind: TraceKind::SynthId,
+            status: TraceStatus::Applied,
+            metadata: ScalarMetadata::Tournament {
+                hash,
+                reductions,
+                depth: self.depth,
+            },
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

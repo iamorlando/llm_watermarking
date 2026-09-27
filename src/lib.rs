@@ -14,6 +14,7 @@ pub mod semstamp;
 pub mod synthid;
 #[cfg(feature = "candle")]
 pub mod tensor;
+pub mod trace;
 pub mod unigram;
 
 #[cfg(feature = "candle")]

@@ -11,6 +11,12 @@ run watermark operations on CPU, CUDA, or Metal while preserving the input devic
 Algorithm errors implement `std::error::Error`; no inference engine is required.
 Rust 1.88 or newer is required by the pinned Candle dependency tree.
 
+Opt-in scalar and tensor sampling traces expose green/favored membership,
+SynthID probability-update layers, post-watermark probabilities and typed keyed
+selection scores. Ordinary sampling methods perform no trace work. See the
+[trace API and Mistral HTTP handoff](docs/sampling-trace.md) and
+[runnable scalar trace example](examples/trace.rs).
+
 ## Candle and GPU integration
 
 Enable `candle` for CPU tensors, `cuda` for Candle CUDA support, or `metal` for

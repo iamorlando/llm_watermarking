@@ -9,11 +9,15 @@ use candle_core::{DType, Device, Result, Tensor};
 
 mod indexed;
 mod resident;
+mod trace;
 pub use indexed::{
     IndexedCandidates, PreparedIndexedBatch, PreparedIndexedOperation, PreparedIndexedSampler,
     PreparedIndexedWatermark,
 };
 pub use resident::DeviceHistory;
+pub use trace::{
+    TensorInverseTrace, TensorSamplingTrace, TensorTournamentLayer, TensorTraceSnapshot,
+};
 
 /// Largest inverse-transform vocabulary with distinct integer ranks in F32 scores.
 pub const MAX_INVERSE_TENSOR_VOCAB: usize = 1 << 24;

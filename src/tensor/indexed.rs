@@ -316,3 +316,96 @@ impl PreparedIndexedBatch {
         Tensor::stack(&output, 0)
     }
 }
+
+impl PreparedIndexedWatermark {
+    pub fn apply_traced(
+        &self,
+        input: &Tensor,
+        options: &crate::trace::TraceOptions,
+    ) -> Result<TensorSamplingTrace> {
+        self.candidates.validate()?;
+        validate_probabilities(input)?;
+        self.apply_traced_trusted(input, options)
+    }
+    pub fn apply_traced_trusted(
+        &self,
+        input: &Tensor,
+        options: &crate::trace::TraceOptions,
+    ) -> Result<TensorSamplingTrace> {
+        let trace = self
+            .prepared
+            .apply_traced_trusted(input, options)?
+            .indexed(&self.candidates);
+        match &self.active {
+            Some(active) => trace.with_active(active),
+            None => Ok(trace),
+        }
+    }
+}
+
+impl PreparedIndexedSampler {
+    pub fn apply_traced(
+        &self,
+        input: &Tensor,
+        options: &crate::trace::TraceOptions,
+    ) -> Result<TensorSamplingTrace> {
+        self.candidates.validate()?;
+        validate_probabilities(input)?;
+        self.apply_traced_trusted(input, options)
+    }
+    pub fn apply_traced_trusted(
+        &self,
+        input: &Tensor,
+        options: &crate::trace::TraceOptions,
+    ) -> Result<TensorSamplingTrace> {
+        Ok(self
+            .prepared
+            .apply_traced_trusted(input, options)?
+            .indexed(&self.candidates))
+    }
+}
+
+impl PreparedIndexedOperation {
+    pub fn apply_traced(
+        &self,
+        input: &Tensor,
+        options: &crate::trace::TraceOptions,
+    ) -> Result<TensorSamplingTrace> {
+        match self {
+            Self::Probabilities(p) => p.apply_traced(input, options),
+            Self::SelectionScores(p) => p.apply_traced(input, options),
+        }
+    }
+    pub fn apply_traced_trusted(
+        &self,
+        input: &Tensor,
+        options: &crate::trace::TraceOptions,
+    ) -> Result<TensorSamplingTrace> {
+        match self {
+            Self::Probabilities(p) => p.apply_traced_trusted(input, options),
+            Self::SelectionScores(p) => p.apply_traced_trusted(input, options),
+        }
+    }
+}
+
+impl PreparedIndexedBatch {
+    /// Per-row traces preserve the same keys, contexts, and selection rules as
+    /// the ordinary batch. Each trace exposes its authoritative output row.
+    pub fn apply_traced_trusted(
+        &self,
+        input: &Tensor,
+        options: &[crate::trace::TraceOptions],
+    ) -> Result<Vec<TensorSamplingTrace>> {
+        if input.dims2()? != (self.rows.len(), self.rows[0].candidates().len())
+            || options.len() != self.rows.len()
+        {
+            candle_core::bail!("trace batch shape/options do not match preparations");
+        }
+        self.rows
+            .iter()
+            .zip(options)
+            .enumerate()
+            .map(|(i, (row, options))| row.apply_traced_trusted(&input.get(i)?, options))
+            .collect()
+    }
+}
