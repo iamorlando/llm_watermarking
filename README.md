@@ -17,6 +17,19 @@ selection scores. Ordinary sampling methods perform no trace work. See the
 [trace API and Mistral HTTP handoff](docs/sampling-trace.md) and
 [runnable scalar trace example](examples/trace.rs).
 
+SynthID also offers a separate [teaching tournament API](docs/tournament-demo.md)
+with up to 16 sampled contestants, match scores, winner explanations and isolated
+diagnostic randomness. It runs only when explicitly called; its demonstration
+winner is separate from the generated token.
+
+For an authoritative bracket, the [production tournament API](docs/generation-tournament.md)
+selects the token and optionally captures its actual matches using the host's
+live generation RNG. Traced and untraced calls preserve token/RNG parity;
+collapsed subtrees bound capture without reducing generation depth. Explicit
+sampling supports depths up to 20; the default depth-30 probability-update path
+has no production bracket. See the [host migration guide](docs/generation-tournament-migration.md)
+and [same-call generation example](examples/generation_tournament.rs).
+
 ## Candle and GPU integration
 
 Enable `candle` for CPU tensors, `cuda` for Candle CUDA support, or `metal` for
@@ -25,7 +38,7 @@ empty, so scalar-only users do not compile Candle.
 
 ```toml
 [dependencies]
-llm-watermarking = { path = "../llm_watermarking", features = ["metal"] }
+llm-watermarking = { version = "0.1.0", features = ["metal"] }
 ```
 
 `SynthIdText`, `Kgw`, `Unigram`, and `Mpac` expose `apply_tensor` returning
@@ -41,9 +54,12 @@ device history/positions; `PreparedIndexedBatch` applies independent per-row
 preparations. See the [Mistral feedback response and migration guide](docs/mistral-integration.md)
 and [compact integration example](examples/indexed.rs).
 
-The optional `candle-core` dependency pins Git revision
+In a source checkout, the optional `candle-core` dependency pins Git revision
 `66a8cf184a5a519671454066b1b9efd446ec9f5c`, matching the inspected mistral-rs
-workspace's exact package identity. There is no dependency on mistral-rs itself.
+workspace's exact package identity. The crates.io package uses registry Candle
+0.11 instead; Git-based hosts must align all Candle dependencies with a workspace
+patch (see [dependency identity](docs/candle.md#dependency-identity-and-features)).
+There is no dependency on mistral-rs itself.
 The host must call after probability filters and before token selection; its
 existing pre-filter logits processor is not that insertion point.
 
@@ -82,11 +98,11 @@ provider configurations. See [format and implementation choices](docs/formats.md
 ## Use
 
 The package is named `llm-watermarking` and its Rust import is `llm_watermarking`.
-Until it is published or hosted remotely, add it as a local dependency:
+Add the crates.io dependency:
 
 ```toml
 [dependencies]
-llm-watermarking = { path = "../llm_watermarking", version = "0.1.0" }
+llm-watermarking = "0.1.0"
 ```
 
 ```rust

@@ -280,7 +280,15 @@ pub(crate) fn sort_u32(input: &Tensor) -> Result<(Tensor, Tensor)> {
         candle_core::bail!("metadata sort requires a nonempty U32 row");
     }
     if count <= 1024 || input.device().is_cpu() {
-        return input.contiguous()?.sort_last_dim(true);
+        let input = input.contiguous()?;
+        // Registry Candle 0.11 CPU argsort ignores the storage offset. A
+        // contiguous view can still have an offset; materialize only that case.
+        let input = if input.device().is_cpu() && input.layout().start_offset() != 0 {
+            input.force_contiguous()?
+        } else {
+            input
+        };
+        return input.sort_last_dim(true);
     }
     let size = count
         .checked_next_power_of_two()

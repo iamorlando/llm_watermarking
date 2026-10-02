@@ -1,7 +1,7 @@
 use super::*;
 
 /// Immutable device-resident token prefix and its logical lengths. Tokens have
-/// shape [capacity]; length and prompt_len each have shape [1], all U32. Padding
+/// shape `[capacity]`; length and prompt_len each have shape `[1]`, all U32. Padding
 /// after length is ignored. The complete prefix is required for SynthID repeats.
 #[derive(Clone)]
 pub struct DeviceHistory {

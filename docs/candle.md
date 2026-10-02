@@ -7,12 +7,27 @@ filters, batching, scheduling, token selection, and public service interfaces.
 
 ## Dependency identity and features
 
-`candle-core` is optional and uses the same source, version, and revision as the
-inspected mistral-rs workspace:
+In a source checkout, optional `candle-core` uses the same source, version, and
+revision as the inspected mistral-rs workspace:
 
 ```toml
 candle-core = { git = "https://github.com/huggingface/candle.git", rev = "66a8cf184a5a519671454066b1b9efd446ec9f5c", version = "0.11.0", default-features = false }
 ```
+
+Cargo removes Git sources when publishing: the crates.io package depends on
+registry `candle-core` and `candle-metal-kernels` version `0.11`. For a host that
+already uses the pinned Git Candle, add these overrides to the **host workspace
+root** so the registry dependency resolves to the same package identity:
+
+```toml
+[patch.crates-io]
+candle-core = { git = "https://github.com/huggingface/candle.git", rev = "66a8cf184a5a519671454066b1b9efd446ec9f5c" }
+candle-metal-kernels = { git = "https://github.com/huggingface/candle.git", rev = "66a8cf184a5a519671454066b1b9efd446ec9f5c" }
+candle-kernels = { git = "https://github.com/huggingface/candle.git", rev = "66a8cf184a5a519671454066b1b9efd446ec9f5c" }
+```
+
+Use the exact same URL/revision selector as the host. These overrides are not
+needed when all host Candle dependencies already come from crates.io.
 
 Features are `candle`, `cuda` (forwarding `candle-core/cuda`), and `metal`
 (forwarding `candle-core/metal` and enabling Candle's Metal kernel wrappers).

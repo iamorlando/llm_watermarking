@@ -5,6 +5,16 @@ agent's inspection and agreed requirements. This extends the
 [GPU integration response](mistral-integration.md). HTTP implementation belongs
 to Mistral; this document is its implementation handoff.
 
+For sampled teaching brackets, use the separate [SynthID tournament demonstration
+API](tournament-demo.md). Existing `layers` remain the actual generation
+probability updates; the optional demonstration is not used for generation.
+
+For matches that actually selected the emitted token, use the separate
+[production tournament sampler](generation-tournament.md) and
+[host migration contract](generation-tournament-migration.md). Its returned token
+is authoritative; selecting that generation policy must be independent of trace
+capture. Probability-update backends must report `no_production_bracket`.
+
 ## Opt-in boundary
 
 All existing scalar `apply`/`sample`, prepared `apply`/`apply_trusted`, preparation

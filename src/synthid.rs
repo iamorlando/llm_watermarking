@@ -4,6 +4,9 @@ use sha2::{Digest, Sha256};
 
 use crate::{WatermarkDetection, WatermarkError};
 
+pub mod generation_tournament;
+pub mod tournament;
+
 pub const KEY_BYTES: usize = 32;
 pub const DEFAULT_NGRAM_LEN: usize = 5;
 pub const MAX_NGRAM_LEN: usize = 32;

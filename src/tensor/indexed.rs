@@ -287,7 +287,7 @@ impl PreparedIndexedBatch {
     pub fn rows(&self) -> &[PreparedIndexedOperation] {
         &self.rows
     }
-    /// Return [B,K] F32 values. Each row retains its declared selection rule.
+    /// Return `[B,K]` F32 values. Each row retains its declared selection rule.
     pub fn apply(&self, input: &Tensor) -> Result<Tensor> {
         self.run(input, false)
     }

@@ -6,8 +6,13 @@ rust-version = "1.88"
 description = "Model-independent text watermarking algorithms in Rust"
 license = "MIT"
 readme = "README.md"
+repository = "https://github.com/iamorlando/llm_watermarking"
+documentation = "https://docs.rs/llm-watermarking"
 keywords = ["llm", "watermarking", "synthid", "text"]
 categories = ["algorithms", "text-processing"]
+
+[package.metadata.docs.rs]
+features = ["candle"]
 
 [dependencies]
 sha2 = "0.10.9"

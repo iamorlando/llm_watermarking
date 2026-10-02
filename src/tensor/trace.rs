@@ -56,8 +56,8 @@ pub struct TensorInverseTrace {
     pub cdf_upper: Tensor,
 }
 
-/// All tensors remain on the sampling device. Row tensors have shape [M];
-/// `active` and each layer's `green_mass` have shape [1]. IDs are U32, masks U8,
+/// All tensors remain on the sampling device. Row tensors have shape `[M]`;
+/// `active` and each layer's `green_mass` have shape `[1]`. IDs are U32, masks U8,
 /// diagnostic probabilities/scores F32, raw output weights retain input dtype.
 #[derive(Clone)]
 pub struct TensorTraceSnapshot {

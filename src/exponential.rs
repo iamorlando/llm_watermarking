@@ -126,7 +126,7 @@ impl ExponentialRace {
         self.indexed_seed(candidates, &seed)
     }
 
-    /// `position` is a U32 tensor of shape [1], independent of prompt length.
+    /// `position` is a U32 tensor of shape `[1]`, independent of prompt length.
     /// Wrapping to the configured key-stream period executes on the device.
     pub fn prepare_indexed_device(
         &self,

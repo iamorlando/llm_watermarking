@@ -32,6 +32,10 @@ pub enum WatermarkError {
     ZeroEmbedding,
     InvalidTraceOptions,
     TraceTooLarge,
+    InvalidTournamentRounds,
+    UnsupportedTournamentDepth { configured: usize, maximum: usize },
+    InvalidGenerationTournamentOptions,
+    InvalidGenerationRngInfo,
 }
 
 impl fmt::Display for WatermarkError {
@@ -98,6 +102,18 @@ impl fmt::Display for WatermarkError {
             Self::TraceTooLarge => {
                 f.write_str("trace snapshot exceeds row or element bounds (or is empty)")
             }
+            Self::InvalidTournamentRounds => {
+                f.write_str("demonstration tournament rounds must be between 1 and 4 and not exceed SynthID depth")
+            }
+            Self::UnsupportedTournamentDepth { configured, maximum } => write!(
+                f, "explicit tournament depth {configured} exceeds supported maximum {maximum}; generation depth is never reduced"
+            ),
+            Self::InvalidGenerationTournamentOptions => f.write_str(
+                "generation tournament capture exceeds maximum matches or layers"
+            ),
+            Self::InvalidGenerationRngInfo => f.write_str(
+                "generation RNG version must be nonempty and effective_seed must be a decimal integer string"
+            ),
         }
     }
 }

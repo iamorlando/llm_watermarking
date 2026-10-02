@@ -144,7 +144,7 @@ impl InverseTransform {
             .indexed(candidates)
     }
 
-    /// Position [1] U32 and the resulting keyed uniform stay on the device.
+    /// Position `[1]` U32 and the resulting keyed uniform stay on the device.
     pub fn prepare_indexed_device(
         &self,
         candidates: &crate::tensor::IndexedCandidates,
